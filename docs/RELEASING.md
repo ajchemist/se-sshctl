@@ -6,17 +6,33 @@ sends a `se-sshctl-release` repository dispatch to `ajchemist/homebrew-tap`.
 The tap independently downloads the immutable tag archive, computes its SHA-256,
 and opens a tested Formula update PR.
 
-## One-time GitHub setup
+## Why a GitHub App
 
-Create a GitHub App installed only on `ajchemist/homebrew-tap` with:
+The repository-scoped `GITHUB_TOKEN` from `se-sshctl` cannot dispatch to
+`ajchemist/homebrew-tap`. The tap also uses an App token when opening its update
+PR so that the Formula test workflow runs for the resulting event. A private
+GitHub App avoids a long-lived personal access token and limits the installation
+to one repository with only the required permissions.
+
+## GitHub App configuration
+
+`se-sshctl Homebrew Release` (App ID `4556534`) is installed only on
+`ajchemist/homebrew-tap` with:
 
 - Contents: read and write;
 - Pull requests: read and write.
 
-Set these in both repositories:
+Metadata read access is mandatory for GitHub Apps. Webhooks and event
+subscriptions are disabled.
+
+Both repositories contain:
 
 - repository variable `HOMEBREW_APP_ID`;
 - repository secret `HOMEBREW_APP_PRIVATE_KEY`.
+
+The PEM is not stored in either repository or retained locally. To rotate it,
+generate a new App private key, update both secrets, verify token issuance, then
+delete the old key in the App settings.
 
 Set `HOMEBREW_LICENSE` in `ajchemist/se-sshctl` to the chosen SPDX identifier and
 commit the matching `LICENSE` file before the first release. The workflow refuses
