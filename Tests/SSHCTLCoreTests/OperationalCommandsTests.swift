@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import SSHCTLCore
@@ -28,7 +29,11 @@ import Testing
     let download = executor.requests.first { $0.arguments.first == "-K" }!
     #expect(download.arguments == ["-K", "-w", "/usr/lib/ssh-keychain.dylib"])
     #expect(download.environment["KEYCHAIN_CERTIFICATES"] == String(repeating: "B", count: 40))
-    #expect(download.standardInput == Data("0\n\n\n".utf8))
+    #expect(download.environment["SSH_ASKPASS_REQUIRE"] == "force")
+    #expect(download.environment["SSH_ASKPASS"] != nil)
+    #expect(download.environment["SE_SSHCTL_ASKPASS_FIFO"] != nil)
+    #expect(download.standardInput == Data())
+    #expect(executor.askPassReplies == [Data("0".utf8), Data(), Data()])
     #expect(throws: OperationalCommandError.destinationExists) {
         try WrapperInstaller(executor: executor).install(
             ctkSHA256: hash, destination: destination, passphrase: Data()
@@ -65,7 +70,11 @@ import Testing
     )
 
     let download = executor.requests.first { $0.arguments.first == "-K" }!
-    #expect(download.standardInput == Data("0\ntest passphrase\ntest passphrase\n".utf8))
+    #expect(download.standardInput == Data())
+    #expect(!download.environment.values.contains("test passphrase"))
+    #expect(executor.askPassReplies == [
+        Data("0".utf8), Data("test passphrase".utf8), Data("test passphrase".utf8),
+    ])
 }
 
 @Test func bioWrapperInstallSuppliesEmptyProviderPIN() throws {
@@ -81,7 +90,8 @@ import Testing
     )
 
     let download = executor.requests.first { $0.arguments.first == "-K" }!
-    #expect(download.standardInput == Data("\n\n\n".utf8))
+    #expect(download.standardInput == Data())
+    #expect(executor.askPassReplies == [Data(), Data(), Data()])
 }
 
 @Test func wrapperInstallReportsOpenSSHTimeout() {
@@ -180,6 +190,7 @@ import Testing
 
 private final class OperationalExecutor: SubprocessExecuting {
     private(set) var requests: [SubprocessRequest] = []
+    private(set) var askPassReplies: [Data] = []
     private let duplicateMetadata: Bool
     private let racingDestination: URL?
     private let protection: String
@@ -213,6 +224,8 @@ private final class OperationalExecutor: SubprocessExecuting {
             ))
         }
         if request.arguments.first == "-K" {
+            let fifo = request.environment["SE_SSHCTL_ASKPASS_FIFO"]!
+            askPassReplies = try (0..<3).map { _ in try readFIFOReply(at: fifo) }
             if downloadTimedOut {
                 return SubprocessResult(
                     stdout: "", stderr: "", exitStatus: 15, terminationReason: .uncaughtSignal, timedOut: true
@@ -237,6 +250,20 @@ private final class OperationalExecutor: SubprocessExecuting {
             try Data("signature".utf8).write(to: URL(fileURLWithPath: challenge + ".sig"))
         }
         return operationalResult()
+    }
+}
+
+private func readFIFOReply(at path: String) throws -> Data {
+    let descriptor = open(path, O_RDONLY | O_NONBLOCK)
+    guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+    defer { close(descriptor) }
+    var reply = Data()
+    var byte: UInt8 = 0
+    while true {
+        let count = Darwin.read(descriptor, &byte, 1)
+        guard count == 1 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        if byte == 10 { return reply }
+        reply.append(byte)
     }
 }
 

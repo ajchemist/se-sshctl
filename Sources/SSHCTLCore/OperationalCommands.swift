@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 private let providerPath = "/usr/lib/ssh-keychain.dylib"
@@ -85,6 +86,13 @@ public struct WrapperInstaller {
             attributes: [.posixPermissions: 0o700]
         )
         defer { try? fileManager.removeItem(at: temporary) }
+        let askPass = temporary.appendingPathComponent("askpass")
+        try Data("""
+        #!/bin/sh
+        IFS= read -r reply < "$SE_SSHCTL_ASKPASS_FIFO" || exit 1
+        printf '%s\n' "$reply"
+        """.utf8).write(to: askPass, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: askPass.path)
 
         var match: (wrapper: URL, publicKey: URL, line: String)?
         var fullDownloadResult: SubprocessResult?
@@ -98,16 +106,28 @@ public struct WrapperInstaller {
                 withIntermediateDirectories: false,
                 attributes: [.posixPermissions: 0o700]
             )
+            let askPassFIFO = attempt.appendingPathComponent("askpass.fifo")
+            guard mkfifo(askPassFIFO.path, 0o600) == 0 else { throw currentPOSIXError() }
+            let askPassFD = open(askPassFIFO.path, O_RDWR | O_CLOEXEC)
+            guard askPassFD >= 0 else { throw currentPOSIXError() }
+            defer { close(askPassFD) }
+            try writeAll(
+                askPassInput(protection: resolved.protection, passphrase: passphrase),
+                to: askPassFD
+            )
             let result = try executor.run(SubprocessRequest(
                 executable: .sshKeygen,
                 arguments: ["-K", "-w", providerPath],
-                environment: ["KEYCHAIN_CERTIFICATES": resolved.providerHash],
+                environment: [
+                    "KEYCHAIN_CERTIFICATES": resolved.providerHash,
+                    "SSH_ASKPASS": askPass.path,
+                    "SSH_ASKPASS_REQUIRE": "force",
+                    "SE_SSHCTL_ASKPASS_FIFO": askPassFIFO.path,
+                ],
                 currentDirectoryURL: attempt,
-                standardInput: downloadInput(
+                standardInput: overwriteInput(
                     selecting: identityIndex,
-                    count: resolved.identityCount,
-                    protection: resolved.protection,
-                    passphrase: passphrase
+                    count: resolved.identityCount
                 ),
                 timeout: 120
             ))
@@ -377,15 +397,42 @@ private func providerEnvironment(hash: String) -> [String: String] {
     ["KEYCHAIN_CERTIFICATES": hash, "SSH_SK_PROVIDER": providerPath]
 }
 
-private func downloadInput(selecting index: Int, count: Int, protection: String, passphrase: Data) -> Data {
+private func askPassInput(protection: String, passphrase: Data) -> Data {
     var input = Data((protection == "bio" ? "\n" : "0\n").utf8)
     input.append(passphrase)
     input.append(10)
     input.append(passphrase)
     input.append(10)
+    return input
+}
+
+private func overwriteInput(selecting index: Int, count: Int) -> Data {
+    var input = Data()
     if index > 1 { input.append(Data(String(repeating: "y\n", count: index - 1).utf8)) }
     if index < count { input.append(Data("n\n".utf8)) }
     return input
+}
+
+private func writeAll(_ data: Data, to descriptor: Int32) throws {
+    try data.withUnsafeBytes { bytes in
+        var offset = 0
+        while offset < bytes.count {
+            let written = Darwin.write(
+                descriptor,
+                bytes.baseAddress!.advanced(by: offset),
+                bytes.count - offset
+            )
+            if written < 0 {
+                if errno == EINTR { continue }
+                throw currentPOSIXError()
+            }
+            offset += written
+        }
+    }
+}
+
+private func currentPOSIXError() -> POSIXError {
+    POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
 }
 
 private func requireTrustedProvider(executor: any SubprocessExecuting, fileManager: FileManager) throws {
