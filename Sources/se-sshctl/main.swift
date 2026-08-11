@@ -2,6 +2,15 @@ import Darwin
 import Foundation
 import SSHCTLCore
 
+if ProcessInfo.processInfo.environment["SE_SSHCTL_ASKPASS_MODE"] == "1" {
+    do {
+        try AskPassResponder.run()
+        exit(EXIT_SUCCESS)
+    } catch {
+        exit(EXIT_FAILURE)
+    }
+}
+
 private enum ConsolePassphraseError: Error, LocalizedError {
     case unavailable
 

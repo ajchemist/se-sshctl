@@ -12,8 +12,10 @@ tokens, and environment dumps must never appear in command output.
 
 ## Trust boundaries
 
-1. `se-sshctl` invokes only fixed absolute Apple system executables with argument
-   arrays; it never builds a shell command.
+1. `se-sshctl` invokes fixed absolute Apple system executables with argument
+   arrays. Resident-wrapper download additionally re-executes the current native
+   `se-sshctl` executable as OpenSSH's askpass responder; it never builds a shell
+   command.
 2. `/usr/sbin/sc_auth` and `/usr/lib/ssh-keychain.dylib` are external system
    boundaries. `doctor` reports path, signature validity, identifier, and Apple
    anchor evidence without claiming hardware-backed operation.
@@ -40,6 +42,8 @@ Enclave provenance attestation is claimed.
 | Threat | Current control | Residual risk |
 | --- | --- | --- |
 | Shell/argument injection through labels | No shell; fixed executables and argument arrays; fixture coverage | Bugs in Apple system tools remain external |
+| Wrapper passphrase disclosure | Echo-disabled controlling-terminal input; anonymous stdin pipe to a native one-line askpass responder; no secret in argv, environment values, persistent files, or command output | Same-user memory inspection and a compromised executable remain outside this boundary |
+| Hung or unexpected askpass prompt | Each native responder consumes exactly one bounded line; exhausted input fails immediately at EOF; the OpenSSH operation has a timeout | Apple/OpenSSH process behavior still needs physical-Mac regression coverage |
 | Parser field confusion | Header-boundary parsing and strict validation | A legitimate future/localized format requires an explicit parser update |
 | Malicious provider replacement | Signature validation plus `identifier` and `anchor apple` evidence | Hosted CI does not prove the local provider actually signs with Secure Enclave |
 | Unauthorized unattended signing | Clear `-t none` semantics and mandatory explicit acknowledgement during creation | This is intrinsic to `none` protection |

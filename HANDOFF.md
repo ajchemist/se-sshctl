@@ -150,7 +150,8 @@ Require an explicit acknowledgement such as `--allow-unattended-signing` before 
 
 ## Process execution rules
 
-- Invoke fixed absolute executable paths.
+- Invoke fixed absolute executable paths. The only non-system child is the
+  current native `se-sshctl` executable when acting as OpenSSH's askpass responder.
 - Use `Process.executableURL` plus an argument array; never invoke `/bin/sh -c`.
 - Keep environment changes scoped to the child process.
 - Capture stdout, stderr, exit status, termination reason, and timeout separately.

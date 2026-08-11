@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Testing
 @testable import SSHCTLCore
@@ -30,10 +29,10 @@ import Testing
     #expect(download.arguments == ["-K", "-w", "/usr/lib/ssh-keychain.dylib"])
     #expect(download.environment["KEYCHAIN_CERTIFICATES"] == String(repeating: "B", count: 40))
     #expect(download.environment["SSH_ASKPASS_REQUIRE"] == "force")
-    #expect(download.environment["SSH_ASKPASS"] != nil)
-    #expect(download.environment["SE_SSHCTL_ASKPASS_FIFO"] != nil)
-    #expect(download.standardInput == Data())
-    #expect(executor.askPassReplies == [Data("0".utf8), Data(), Data()])
+    #expect(download.environment["SSH_ASKPASS"] == Bundle.main.executableURL!.path)
+    #expect(download.environment["SE_SSHCTL_ASKPASS_MODE"] == "1")
+    #expect(download.environment["SE_SSHCTL_ASKPASS_FIFO"] == nil)
+    #expect(download.standardInput == Data("0\n\n\n".utf8))
     #expect(throws: OperationalCommandError.destinationExists) {
         try WrapperInstaller(executor: executor).install(
             ctkSHA256: hash, destination: destination, passphrase: Data()
@@ -70,11 +69,8 @@ import Testing
     )
 
     let download = executor.requests.first { $0.arguments.first == "-K" }!
-    #expect(download.standardInput == Data())
+    #expect(download.standardInput == Data("0\ntest passphrase\ntest passphrase\n".utf8))
     #expect(!download.environment.values.contains("test passphrase"))
-    #expect(executor.askPassReplies == [
-        Data("0".utf8), Data("test passphrase".utf8), Data("test passphrase".utf8),
-    ])
 }
 
 @Test func bioWrapperInstallSuppliesEmptyProviderPIN() throws {
@@ -90,8 +86,7 @@ import Testing
     )
 
     let download = executor.requests.first { $0.arguments.first == "-K" }!
-    #expect(download.standardInput == Data())
-    #expect(executor.askPassReplies == [Data(), Data(), Data()])
+    #expect(download.standardInput == Data("\n\n\n".utf8))
 }
 
 @Test func wrapperInstallReportsOpenSSHTimeout() {
@@ -106,6 +101,24 @@ import Testing
             passphrase: Data()
         )
     }
+}
+
+@Test func wrapperInstallRetriesOverwritePositionsUntilFingerprintMatches() throws {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let executor = OperationalExecutor(identityCount: 2, matchingDownloadAttempt: 2)
+
+    _ = try WrapperInstaller(executor: executor).install(
+        ctkSHA256: hash,
+        destination: root.appendingPathComponent("identity"),
+        passphrase: Data()
+    )
+
+    let downloads = executor.requests.filter { $0.arguments.first == "-K" }
+    #expect(downloads.count == 2)
+    #expect(downloads[0].standardInput == Data("0\n\n\ny\n".utf8))
+    #expect(downloads[1].standardInput == Data("0\n\n\nn\n".utf8))
 }
 
 @Test func failedWrapperInstallDoesNotDeleteACompetitorInstall() {
@@ -190,22 +203,28 @@ import Testing
 
 private final class OperationalExecutor: SubprocessExecuting {
     private(set) var requests: [SubprocessRequest] = []
-    private(set) var askPassReplies: [Data] = []
     private let duplicateMetadata: Bool
     private let racingDestination: URL?
     private let protection: String
     private let downloadTimedOut: Bool
+    private let identityCount: Int
+    private let matchingDownloadAttempt: Int
+    private var downloadAttempt = 0
 
     init(
         duplicateMetadata: Bool = false,
         racingDestination: URL? = nil,
         protection: String = "none",
-        downloadTimedOut: Bool = false
+        downloadTimedOut: Bool = false,
+        identityCount: Int = 1,
+        matchingDownloadAttempt: Int = 1
     ) {
         self.duplicateMetadata = duplicateMetadata
         self.racingDestination = racingDestination
         self.protection = protection
         self.downloadTimedOut = downloadTimedOut
+        self.identityCount = identityCount
+        self.matchingDownloadAttempt = matchingDownloadAttempt
     }
 
     func run(_ request: SubprocessRequest) throws -> SubprocessResult {
@@ -220,12 +239,12 @@ private final class OperationalExecutor: SubprocessExecuting {
             return operationalResult(stdout: identityTable(
                 hashType: request.arguments[typeIndex + 1],
                 duplicateMetadata: duplicateMetadata,
-                protection: protection
+                protection: protection,
+                identityCount: identityCount
             ))
         }
         if request.arguments.first == "-K" {
-            let fifo = request.environment["SE_SSHCTL_ASKPASS_FIFO"]!
-            askPassReplies = try (0..<3).map { _ in try readFIFOReply(at: fifo) }
+            downloadAttempt += 1
             if downloadTimedOut {
                 return SubprocessResult(
                     stdout: "", stderr: "", exitStatus: 15, terminationReason: .uncaughtSignal, timedOut: true
@@ -243,7 +262,10 @@ private final class OperationalExecutor: SubprocessExecuting {
                 try Data("competitor public key".utf8)
                     .write(to: URL(fileURLWithPath: racingDestination.path + ".pub"))
             }
-            return operationalResult(stdout: "256 \(sshFingerprint) test (ECDSA-SK)\n")
+            let fingerprint = matchingDownloadAttempt == 1 || downloadAttempt >= matchingDownloadAttempt
+                ? sshFingerprint
+                : "SHA256:" + String(repeating: "D", count: 43)
+            return operationalResult(stdout: "256 \(fingerprint) test (ECDSA-SK)\n")
         }
         if request.arguments.prefix(2) == ["-Y", "sign"] {
             let challenge = request.arguments.last!
@@ -253,23 +275,14 @@ private final class OperationalExecutor: SubprocessExecuting {
     }
 }
 
-private func readFIFOReply(at path: String) throws -> Data {
-    let descriptor = open(path, O_RDONLY | O_NONBLOCK)
-    guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-    defer { close(descriptor) }
-    var reply = Data()
-    var byte: UInt8 = 0
-    while true {
-        let count = Darwin.read(descriptor, &byte, 1)
-        guard count == 1 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        if byte == 10 { return reply }
-        reply.append(byte)
-    }
-}
-
 private let sshFingerprint = "SHA256:" + String(repeating: "C", count: 43)
 
-private func identityTable(hashType: String, duplicateMetadata: Bool, protection: String) -> String {
+private func identityTable(
+    hashType: String,
+    duplicateMetadata: Bool,
+    protection: String,
+    identityCount: Int
+) -> String {
     let text = try! String(
         contentsOf: Bundle.module.url(
             forResource: "identities-multiple",
@@ -289,6 +302,9 @@ private func identityTable(hashType: String, duplicateMetadata: Bool, protection
     let row = lines[1]
         .replacingOccurrences(of: String(repeating: "A", count: 64), with: paddedHash)
         .replacingOccurrences(of: "  none  ", with: "  \(paddedProtection)  ")
+    if identityCount == 2, hashType == "sha256" {
+        return lines[0] + "\n" + row + "\n" + lines[2] + "\n"
+    }
     guard duplicateMetadata, hashType != "sha256" else { return lines[0] + "\n" + row + "\n" }
     let otherHash = hashType == "sha1"
         ? String(repeating: "D", count: 40)
