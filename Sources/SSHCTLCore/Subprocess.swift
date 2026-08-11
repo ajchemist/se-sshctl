@@ -128,12 +128,14 @@ public struct ProcessExecutor: SubprocessExecuting {
         }
         let timedOut = process.isRunning
         if timedOut {
+            killDescendants(of: process.processIdentifier, signal: SIGKILL)
             process.terminate()
             let terminationDeadline = Date().addingTimeInterval(1)
             while process.isRunning && Date() < terminationDeadline {
                 Thread.sleep(forTimeInterval: 0.01)
             }
             if process.isRunning {
+                killDescendants(of: process.processIdentifier, signal: SIGKILL)
                 kill(process.processIdentifier, SIGKILL)
             }
         }
@@ -149,6 +151,26 @@ public struct ProcessExecutor: SubprocessExecuting {
             timedOut: timedOut
         )
     }
+}
+
+private func killDescendants(of processID: pid_t, signal: Int32) {
+    for child in childProcessIDs(of: processID) {
+        killDescendants(of: child, signal: signal)
+        if childProcessIDs(of: processID).contains(child) {
+            kill(child, signal)
+        }
+    }
+}
+
+private func childProcessIDs(of processID: pid_t) -> [pid_t] {
+    let capacity = proc_listchildpids(processID, nil, 0)
+    guard capacity > 0 else { return [] }
+    var processIDs = [pid_t](repeating: 0, count: Int(capacity))
+    let count = processIDs.withUnsafeMutableBytes {
+        proc_listchildpids(processID, $0.baseAddress, Int32($0.count))
+    }
+    guard count > 0 else { return [] }
+    return Array(processIDs.prefix(Int(count)))
 }
 
 private final class LockedData: @unchecked Sendable {

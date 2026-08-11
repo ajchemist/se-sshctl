@@ -37,7 +37,7 @@ import Testing
         arguments: [
             "-F", "none",
             "-o", "BatchMode=yes",
-            "-o", "ProxyCommand=/bin/sleep 1",
+            "-o", "ProxyCommand=/bin/sh -c 'trap \"\" HUP TERM; sleep 2'",
             "example.invalid",
         ],
         standardInput: Data(repeating: 65, count: 2 * 1024 * 1024),

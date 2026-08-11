@@ -122,6 +122,22 @@ import Testing
     }
 }
 
+@Test func wrapperInstallRejectsMissingPassphrasePrompt() {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(throws: OperationalCommandError.commandFailed(
+        "native askpass rejected an unexpected OpenSSH prompt"
+    )) {
+        try WrapperInstaller(executor: OperationalExecutor(passphrasePromptCount: 1)).install(
+            ctkSHA256: hash,
+            destination: root.appendingPathComponent("identity"),
+            passphrase: Data("expected passphrase".utf8)
+        )
+    }
+}
+
 @Test func wrapperInstallRetriesOverwritePositionsUntilFingerprintMatches() throws {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -231,6 +247,7 @@ private final class OperationalExecutor: SubprocessExecuting {
     private let protection: String
     private let downloadTimedOut: Bool
     private let askPassFailed: Bool
+    private let passphrasePromptCount: Int
     private let identityCount: Int
     private let matchingDownloadAttempt: Int
     private var downloadAttempt = 0
@@ -241,6 +258,7 @@ private final class OperationalExecutor: SubprocessExecuting {
         protection: String = "none",
         downloadTimedOut: Bool = false,
         askPassFailed: Bool = false,
+        passphrasePromptCount: Int = 2,
         identityCount: Int = 1,
         matchingDownloadAttempt: Int = 1
     ) {
@@ -249,6 +267,7 @@ private final class OperationalExecutor: SubprocessExecuting {
         self.protection = protection
         self.downloadTimedOut = downloadTimedOut
         self.askPassFailed = askPassFailed
+        self.passphrasePromptCount = passphrasePromptCount
         self.identityCount = identityCount
         self.matchingDownloadAttempt = matchingDownloadAttempt
     }
@@ -282,11 +301,10 @@ private final class OperationalExecutor: SubprocessExecuting {
                 .write(to: directory.appendingPathComponent("id_test.pub"))
             let askPassResult = askPassFailed
                 ? AskPassResponder.failureMarker
-                : """
-                  \(AskPassResponder.successMarker):pin
-                  \(AskPassResponder.successMarker):passphrase
-                  \(AskPassResponder.successMarker):passphrase
-                  """
+                : (["\(AskPassResponder.successMarker):pin"] + Array(
+                    repeating: "\(AskPassResponder.successMarker):passphrase",
+                    count: passphrasePromptCount
+                )).joined(separator: "\n")
             return operationalResult(stderr: askPassResult)
         }
         if request.arguments.first == "-l" {
