@@ -4,7 +4,9 @@ Stable `vMAJOR.MINOR.PATCH` tags are the only inputs to Homebrew distribution.
 The release workflow builds and tests the tag, creates its GitHub Release, then
 sends a `se-sshctl-release` repository dispatch to `ajchemist/homebrew-tap`.
 The tap independently downloads the immutable tag archive, computes its SHA-256,
-and opens a tested Formula update PR.
+and opens a Formula update PR. Homebrew's `test-bot` builds and tests the source
+fallback and a macOS 26 bottle. After that exact PR commit passes, `pr-pull`
+publishes the bottle to GitHub Packages and commits its checksums to the Formula.
 
 ## Why a GitHub App
 
@@ -38,9 +40,11 @@ Set `HOMEBREW_LICENSE` in `ajchemist/se-sshctl` to the chosen SPDX identifier an
 commit the matching `LICENSE` file before the first release. The workflow refuses
 to publish without both values.
 
-Protect the tap's `master` branch with the `test-formula` check and enable auto
-merge. The App-created update PR will then merge only after Homebrew builds and
-tests the Formula.
+The bottle publish workflow accepts only successful `Test se-sshctl Formula`
+runs for same-repository `automation/se-sshctl-*` branches and pins the reviewed
+head SHA when invoking `brew pr-pull`. The Formula keeps its source URL and build
+instructions as a fallback; normal `brew install ajchemist/tap/se-sshctl` uses a
+matching published bottle when one is available.
 
 ## Release
 
