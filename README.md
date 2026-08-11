@@ -3,7 +3,14 @@
 `se-sshctl` is a dependency-free Swift CLI for managing and verifying Apple's
 CryptoTokenKit-backed Secure Enclave SSH identities on macOS.
 
-## Commands
+## Install
+
+```sh
+brew install ajchemist/tap/se-sshctl
+se-sshctl doctor
+```
+
+## Development
 
 ```sh
 swift build
