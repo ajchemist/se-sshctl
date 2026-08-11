@@ -126,3 +126,17 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Agent skills
+
+### Issue tracker
+
+Durable work is tracked in Beads (`bd`), backed by the repository's local Dolt database. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The canonical triage label names are used unchanged in Beads. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Vocabulary currently lives in `CONTEXT.md`, and architectural decisions live as Beads `decision` records—not ADR files. See `docs/agents/domain.md`.

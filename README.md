@@ -43,8 +43,7 @@ intended.
 Plumbing preserves native `sc_auth`, `ssh-keygen`, and SSH vocabulary while
 enforcing the SSH-only scope and safety invariants. Porcelain may compose those
 commands into user-defined workflows; today `identity retire` is the only porcelain
-command. See [ADR 0001](docs/adr/0001-plumbing-preserves-native-vocabulary.md)
-and the [domain language](CONTEXT.md).
+command. See Beads decision `se-sshctl-1a7` and the [domain language](CONTEXT.md).
 
 ## Security meaning
 
@@ -76,3 +75,10 @@ controlled physical Mac and are never part of the default suite.
 See [the physical-Mac verification record](docs/HARDWARE_VERIFICATION.md) for the
 tested create/install/sign/authenticate/revoke/delete canary flow and remaining
 session-context gaps.
+
+## Acknowledgements
+
+`se-sshctl` was inspired by the [Hacker News discussion of native Secure
+Enclave-backed SSH keys on macOS](https://news.ycombinator.com/item?id=46025721).
+It also follows prior work in the [sekey project](https://github.com/sekey/sekey)
+and [Secretive](https://github.com/maxgoedjen/secretive).
