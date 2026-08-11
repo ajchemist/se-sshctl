@@ -1,0 +1,4 @@
+Key Type  Public Key Hash                                                   Prot  Label                   Common Name             Email Address             Valid To          Valid
+p-256-ne  AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  none  deploy key 東京           deployment 東京           ops@example.test          2030-01-01 00:00  YES
+p-256-ne  BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB  bio   deploy key 東京           duplicate               second@example.test       2031-02-03 04:05  YES
+p-384-ne  CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC  none  prod $(touch nope)      shell-safe                                        2025-06-07 08:09  NO

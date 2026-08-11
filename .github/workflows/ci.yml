@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Print environment versions
+        run: |
+          sw_vers
+          uname -m
+          swift --version
+          /usr/bin/ssh -V 2>&1
+          if [[ -e /usr/lib/ssh-keychain.dylib ]]; then
+            /usr/bin/codesign -dr - /usr/lib/ssh-keychain.dylib 2>&1
+          else
+            echo "ssh-keychain provider absent on this hosted image"
+          fi
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Read-only CLI JSON smoke checks
+        run: |
+          swift run --skip-build se-sshctl doctor --json > /tmp/se-sshctl-doctor.json
+          plutil -p /tmp/se-sshctl-doctor.json > /dev/null
+          swift run --skip-build se-sshctl identity list --json > /tmp/se-sshctl-identities.json
+          plutil -p /tmp/se-sshctl-identities.json > /dev/null
+
+      - name: State hardware coverage boundary
+        run: echo "Hosted CI does not test real Secure Enclave creation, signing, biometrics, or remote sessions."
