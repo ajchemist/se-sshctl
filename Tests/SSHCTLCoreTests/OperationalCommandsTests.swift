@@ -68,6 +68,36 @@ import Testing
     #expect(download.standardInput == Data("0\ntest passphrase\ntest passphrase\n".utf8))
 }
 
+@Test func bioWrapperInstallSuppliesEmptyProviderPIN() throws {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let executor = OperationalExecutor(protection: "bio")
+
+    _ = try WrapperInstaller(executor: executor).install(
+        ctkSHA256: hash,
+        destination: root.appendingPathComponent("identity"),
+        passphrase: Data()
+    )
+
+    let download = executor.requests.first { $0.arguments.first == "-K" }!
+    #expect(download.standardInput == Data("\n\n\n".utf8))
+}
+
+@Test func wrapperInstallReportsOpenSSHTimeout() {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(throws: OperationalCommandError.commandFailed("timed out")) {
+        try WrapperInstaller(executor: OperationalExecutor(downloadTimedOut: true)).install(
+            ctkSHA256: hash,
+            destination: root.appendingPathComponent("identity"),
+            passphrase: Data()
+        )
+    }
+}
+
 @Test func failedWrapperInstallDoesNotDeleteACompetitorInstall() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -152,10 +182,19 @@ private final class OperationalExecutor: SubprocessExecuting {
     private(set) var requests: [SubprocessRequest] = []
     private let duplicateMetadata: Bool
     private let racingDestination: URL?
+    private let protection: String
+    private let downloadTimedOut: Bool
 
-    init(duplicateMetadata: Bool = false, racingDestination: URL? = nil) {
+    init(
+        duplicateMetadata: Bool = false,
+        racingDestination: URL? = nil,
+        protection: String = "none",
+        downloadTimedOut: Bool = false
+    ) {
         self.duplicateMetadata = duplicateMetadata
         self.racingDestination = racingDestination
+        self.protection = protection
+        self.downloadTimedOut = downloadTimedOut
     }
 
     func run(_ request: SubprocessRequest) throws -> SubprocessResult {
@@ -169,10 +208,16 @@ private final class OperationalExecutor: SubprocessExecuting {
             let typeIndex = request.arguments.firstIndex(of: "-t")!
             return operationalResult(stdout: identityTable(
                 hashType: request.arguments[typeIndex + 1],
-                duplicateMetadata: duplicateMetadata
+                duplicateMetadata: duplicateMetadata,
+                protection: protection
             ))
         }
         if request.arguments.first == "-K" {
+            if downloadTimedOut {
+                return SubprocessResult(
+                    stdout: "", stderr: "", exitStatus: 15, terminationReason: .uncaughtSignal, timedOut: true
+                )
+            }
             let directory = request.currentDirectoryURL!
             try Data("wrapper".utf8).write(to: directory.appendingPathComponent("id_test"))
             try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
@@ -197,7 +242,7 @@ private final class OperationalExecutor: SubprocessExecuting {
 
 private let sshFingerprint = "SHA256:" + String(repeating: "C", count: 43)
 
-private func identityTable(hashType: String, duplicateMetadata: Bool) -> String {
+private func identityTable(hashType: String, duplicateMetadata: Bool, protection: String) -> String {
     let text = try! String(
         contentsOf: Bundle.module.url(
             forResource: "identities-multiple",
@@ -213,7 +258,10 @@ private func identityTable(hashType: String, duplicateMetadata: Bool) -> String 
     default: String(repeating: "A", count: 64)
     }
     let paddedHash = hash + String(repeating: " ", count: 64 - hash.count)
-    let row = lines[1].replacingOccurrences(of: String(repeating: "A", count: 64), with: paddedHash)
+    let paddedProtection = protection.padding(toLength: 4, withPad: " ", startingAt: 0)
+    let row = lines[1]
+        .replacingOccurrences(of: String(repeating: "A", count: 64), with: paddedHash)
+        .replacingOccurrences(of: "  none  ", with: "  \(paddedProtection)  ")
     guard duplicateMetadata, hashType != "sha256" else { return lines[0] + "\n" + row + "\n" }
     let otherHash = hashType == "sha1"
         ? String(repeating: "D", count: 40)

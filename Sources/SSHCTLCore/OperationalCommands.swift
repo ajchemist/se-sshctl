@@ -106,6 +106,7 @@ public struct WrapperInstaller {
                 standardInput: downloadInput(
                     selecting: identityIndex,
                     count: resolved.identityCount,
+                    protection: resolved.protection,
                     passphrase: passphrase
                 ),
                 timeout: 120
@@ -345,6 +346,7 @@ private struct ResolvedIdentity {
     let providerHash: String
     let sshFingerprint: String
     let identityCount: Int
+    let protection: String
 }
 
 private struct IdentityResolver {
@@ -365,7 +367,8 @@ private struct IdentityResolver {
         return ResolvedIdentity(
             providerHash: sha1[0].ctkPublicKeyHash.uppercased(),
             sshFingerprint: ssh[0].ctkPublicKeyHash,
-            identityCount: sha256.count
+            identityCount: sha256.count,
+            protection: target.protection
         )
     }
 }
@@ -374,8 +377,8 @@ private func providerEnvironment(hash: String) -> [String: String] {
     ["KEYCHAIN_CERTIFICATES": hash, "SSH_SK_PROVIDER": providerPath]
 }
 
-private func downloadInput(selecting index: Int, count: Int, passphrase: Data) -> Data {
-    var input = Data("0\n".utf8) // Apple provider placeholder, then wrapper passphrase twice.
+private func downloadInput(selecting index: Int, count: Int, protection: String, passphrase: Data) -> Data {
+    var input = Data((protection == "bio" ? "\n" : "0\n").utf8)
     input.append(passphrase)
     input.append(10)
     input.append(passphrase)
@@ -422,6 +425,7 @@ private func validatedPublicKey(at url: URL) throws -> String {
 
 private func requireOperationalSuccess(_ result: SubprocessResult) throws {
     guard !result.timedOut, result.terminationReason == .exit, result.exitStatus == 0 else {
+        if result.timedOut { throw OperationalCommandError.commandFailed("timed out") }
         let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         throw OperationalCommandError.commandFailed(detail)
     }
