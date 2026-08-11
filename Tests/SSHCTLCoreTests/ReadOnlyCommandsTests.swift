@@ -34,7 +34,9 @@ import Testing
 
     let report = try IdentityLister(executor: executor).list()
 
-    #expect(report.schemaVersion == 1)
+    #expect(report.schemaVersion == 2)
+    #expect(report.hashType == .sha256)
+    #expect(report.hashEncoding == .hex)
     #expect(report.identities.isEmpty)
     #expect(executor.requests == [
         SubprocessRequest(
@@ -62,9 +64,9 @@ import Testing
 }
 
 @Test func jsonOutputIsSchemaVersionedAndDeterministic() throws {
-    let report = IdentityListReport(schemaVersion: 1, identities: [])
+    let report = IdentityListReport(identities: [])
 
-    #expect(try JSONOutput.encode(report) == #"{"identities":[],"schemaVersion":1}"#)
+    #expect(try JSONOutput.encode(report) == #"{"hashEncoding":"hex","hashType":"sha256","identities":[],"schemaVersion":2}"#)
 }
 
 private func result(

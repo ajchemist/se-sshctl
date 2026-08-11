@@ -16,13 +16,33 @@ public enum CTKIdentityParseError: Error, Equatable {
     case malformedRow(Int)
 }
 
+public enum CTKIdentityHashType: String, Codable, Sendable {
+    case sha1
+    case sha256
+    case ssh
+}
+
+public enum CTKIdentityHashEncoding: String, Codable, Sendable {
+    case hex
+    case b64
+}
+
 public struct CTKIdentityParser {
     private let headers = [
         "Key Type", "Public Key Hash", "Prot", "Label",
         "Common Name", "Email Address", "Valid To", "Valid",
     ]
 
-    public init() {}
+    private let hashType: CTKIdentityHashType
+    private let hashEncoding: CTKIdentityHashEncoding
+
+    public init(
+        hashType: CTKIdentityHashType = .sha256,
+        hashEncoding: CTKIdentityHashEncoding = .hex
+    ) {
+        self.hashType = hashType
+        self.hashEncoding = hashEncoding
+    }
 
     public func parse(_ output: String) throws -> [CTKIdentity] {
         let lines = output.split(whereSeparator: \Character.isNewline).map(String.init)
@@ -33,7 +53,7 @@ public struct CTKIdentityParser {
             let values = try fields(in: line, starts: starts, lineNumber: offset + 2)
             guard
                 ["p-256", "p-384", "p-521", "p-256-ne", "p-384-ne"].contains(values[0]),
-                values[1].range(of: #"^[0-9A-Fa-f]{64}$"#, options: .regularExpression) != nil,
+                validHash(values[1]),
                 ["bio", "none"].contains(values[2]),
                 !values[3].isEmpty,
                 !values[6].isEmpty,
@@ -51,6 +71,17 @@ public struct CTKIdentityParser {
                 certificateValid: values[7] == "YES"
             )
         }
+    }
+
+    private func validHash(_ value: String) -> Bool {
+        let pattern = switch (hashType, hashEncoding) {
+        case (.sha1, .hex): #"^[0-9A-Fa-f]{40}$"#
+        case (.sha1, .b64): #"^[A-Za-z0-9+/]{27}=$"#
+        case (.sha256, .hex), (.ssh, .hex): #"^[0-9A-Fa-f]{64}$"#
+        case (.sha256, .b64): #"^[A-Za-z0-9+/]{43}=$"#
+        case (.ssh, .b64): #"^SHA256:[A-Za-z0-9+/]{43}$"#
+        }
+        return value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private func columnStarts(in header: String) throws -> [Int] {

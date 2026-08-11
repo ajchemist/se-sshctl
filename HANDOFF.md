@@ -4,7 +4,7 @@
 
 Build a production-oriented macOS CLI that manages and verifies SSH identities created by Apple’s native CryptoTokenKit/Secure Enclave path on macOS Tahoe and newer.
 
-The implementation will be continued in the Orca app with Codex or Claude. Start by reading this file. There is no implementation yet.
+The Swift CLI command surface, unit tests, and one controlled physical-Mac `p-256-ne + none` canary run are implemented. See `docs/HARDWARE_VERIFICATION.md` for verified and unverified session contexts.
 
 The tool is tentatively named `se-sshctl`.
 
@@ -31,48 +31,11 @@ auth=none = there is no per-use user authentication
 
 An interactive mode may also support `bio`, but it must not be silently selected for a remote workflow, and `none` must never be a silent fallback from failed biometric setup.
 
-## Newly accepted distribution and automation requirements
+## Distribution and CI requirements
 
 The project will be published as a **public GitHub repository**. Use GitHub Actions with `macos-latest` as the primary hosted CI environment for Swift build, unit tests, parser fixtures, CLI smoke tests, and packaging checks.
 
 Do not claim that GitHub-hosted runners verify real Secure Enclave behavior. Hosted `macos-latest` runners may be virtualized, their image changes over time, and they are not the hardware-backed CTK integration boundary. Keep hardware/Keychain mutation tests opt-in and run them on controlled physical Macs. CI should still record `sw_vers`, Swift, and OpenSSH versions so image drift is visible.
-
-The CLI must support a post-creation automation event that can deliver the generated **public key and key-created metadata** to an HTTPS webhook. The first version should define and test a stable event contract before coupling it to any specific automation platform.
-
-Suggested event name and minimum payload:
-
-```json
-{
-  "schemaVersion": 1,
-  "eventId": "UUID",
-  "eventType": "ssh.key.created",
-  "occurredAt": "RFC3339 timestamp",
-  "identity": {
-    "label": "example",
-    "keyType": "p-256-ne",
-    "protection": "none",
-    "ctkPublicKeyHash": "...",
-    "sshFingerprint": "SHA256:...",
-    "publicKey": "sk-ecdsa-sha2-nistp256@openssh.com ..."
-  },
-  "verification": {
-    "localSigning": "passed"
-  }
-}
-```
-
-Webhook constraints:
-
-- emit only after identity discovery, public-key extraction, fingerprint matching, wrapper installation, and required local verification have completed;
-- never include private material, wrapper contents, Keychain data, passphrases, tokens, environment dumps, or unrelated identity inventory;
-- use HTTPS, bounded connect/request timeouts, deterministic JSON encoding, an idempotent event ID, and a user-agent/version;
-- support request authentication such as an HMAC signature, but keep the signing secret outside repository files and command-line arguments;
-- treat “key created, webhook failed” as an explicit partial-success state; never delete the CTK identity as automatic rollback;
-- persist enough non-secret outbox state for an explicit retry command, with duplicate delivery made safe by `eventId`;
-- make webhook delivery optional and test it against a local mock server in CI;
-- design the sink behind a protocol so tests do not require network access.
-
-The exact endpoint configuration, HMAC header names, retry policy, and outbox location are product decisions to document before enabling live delivery. Implement a conservative default and expose the assumptions in help and JSON output.
 
 ## Fixed architectural direction
 
@@ -96,6 +59,8 @@ Do not implement:
 - a TTY passphrase gate that claims to protect the underlying `none` key.
 
 Use `sc_auth` for CTK identity mutations. Swift should provide safe orchestration, state comparison, filesystem handling, machine-readable output, and verification.
+
+Keep external integration out of this CLI. It may print verified public-key metadata as human-readable text or schema-versioned JSON, but it must not deliver events, manage network credentials, persist delivery queues, or call automation services.
 
 This uses the same Apple system path as [`sekey.sh`](https://github.com/cavoirom/sekey-sh), but the product should not be a renamed shell script. `sekey.sh` is reference material for commands and failure cases.
 
@@ -159,26 +124,26 @@ Names may be adjusted, but keep responsibilities separated:
 
 ```text
 se-sshctl doctor [--json]
-se-sshctl identity list [--json]
-se-sshctl identity create --label LABEL --profile interactive|remote
-se-sshctl wrapper install --identity HASH [--destination PATH]
-se-sshctl config render --identity HASH --host-pattern PATTERN
-se-sshctl verify local --identity HASH
-se-sshctl verify remote --identity HASH --target HOST
+se-sshctl identity list [-t sha1|sha256|ssh] [-e hex|b64] [--json]
+se-sshctl identity create -l LABEL -k p-256-ne -t bio|none
+se-sshctl wrapper install --ctk-sha256 SHA256 [--destination PATH]
+se-sshctl config render --identity-file PATH --host-pattern PATTERN
+se-sshctl verify local --ctk-sha256 SHA256 --wrapper PATH
+se-sshctl verify remote --ctk-sha256 SHA256 --wrapper PATH --target HOST
 ```
 
-Defer destructive lifecycle commands until creation, discovery, wrapper handling, and verification are proven:
+Keep native deletion separate from porcelain retirement:
 
 ```text
-se-sshctl identity retire ...
-se-sshctl identity delete ...
+se-sshctl identity delete -h SHA1 --confirm SHA1
+se-sshctl identity retire --ctk-sha256 SHA256 --confirm SHA256 --remote-authorization-cleared --recovery-access-verified
 ```
 
-Proposed profiles:
+Porcelain may later name these combinations, but plumbing preserves sc_auth values:
 
 ```text
-interactive → p-256-ne + bio
-remote      → p-256-ne + none
+-k p-256-ne -t bio
+-k p-256-ne -t none
 ```
 
 Require an explicit acknowledgement such as `--allow-unattended-signing` before creating a `none` identity. Do not rely on a generic yes/no prompt alone in non-interactive mode.
@@ -199,7 +164,7 @@ For generated SSH configuration, prefer an explicit wrapper and provider:
 
 ```sshconfig
 Host example-pattern
-    IdentityFile ~/.ssh/secure-enclave/<stable-name>
+    IdentityFile ~/.ssh/identities/<stable-name>
     SecurityKeyProvider /usr/lib/ssh-keychain.dylib
     IdentitiesOnly yes
     ForwardAgent no
@@ -212,12 +177,13 @@ Do not make `ssh-agent` resident-key discovery the normal runtime path.
 Keep these identifiers distinct:
 
 ```text
-label                   human-readable mutable metadata
-CTK public-key hash     local lookup/deletion/provider-selection locator
-SSH SHA-256 fingerprint server deployment/rotation/audit identity
+label                   human-readable, non-unique metadata
+CTK SHA-256/hex hash    se-sshctl operational selector
+CTK SHA-1/hex hash      sc_auth deletion and provider-selection locator
+SSH SHA-256 fingerprint wrapper/deployment/rotation/audit identity
 ```
 
-The SSH SHA-256 fingerprint should be the canonical operational identity. Labels may contain spaces or Unicode and may be duplicated.
+The SSH SHA-256 fingerprint is the canonical server-facing identity; CTK SHA-256/hex is the canonical local selector. Labels may contain spaces or Unicode and may be duplicated.
 
 A machine-readable manifest should include at least:
 
@@ -225,7 +191,8 @@ A machine-readable manifest should include at least:
 {
   "schemaVersion": 1,
   "label": "example",
-  "ctkPublicKeyHash": "...",
+  "ctkSHA256": "...",
+  "ctkSHA1": "...",
   "sshFingerprint": "SHA256:...",
   "keyType": "p-256-ne",
   "protection": "none",
@@ -273,7 +240,7 @@ Requirements:
 - detect prompts and timeouts;
 - never overwrite an existing file;
 - match by fingerprint, not filename or list order;
-- install the wrapper with mode `0600` and parent directory `0700`;
+- install the wrapper with mode `0400`, its `.pub` file with mode `0444`, and parent directory `0700`;
 - install the public key separately;
 - use an atomic move after verification.
 
@@ -301,7 +268,7 @@ Do not claim “headless supported” until this matrix has real results.
 
 ## OpenSSH user-presence compatibility question
 
-The CTK key is presented as an OpenSSH `sk-*` key. OpenSSH servers can enforce the security-key user-presence and user-verification flags. `authorized_keys` supports `no-touch-required`, but it is not yet verified whether Apple’s provider maps a `none` identity to a signature that passes the default server policy.
+The CTK key is presented as an OpenSSH `sk-*` key. OpenSSH servers can enforce the security-key user-presence and user-verification flags. On the verified macOS 26.6.1 localhost canary, a `none` identity passed the default server policy without `no-touch-required`; other server versions and policies still require explicit verification.
 
 Do not add `no-touch-required` speculatively. Test both:
 
@@ -314,9 +281,9 @@ Capture client verbose logs and server authentication logs. Make the result part
 
 A `p-256-ne + none` identity protects against private-key extraction and cloning. It does not protect against signing abuse by malware or an attacker already executing in the user context.
 
-Treat remote-profile identities as device-bound machine credentials:
+Treat identities created with `-t none` as device-bound machine credentials:
 
-- one independent key per Mac and role;
+- one independent key per Mac and intended use;
 - no key copying between Macs;
 - no agent forwarding;
 - avoid one universal key with broad root access;
@@ -331,13 +298,13 @@ Do not promise remote attestation of Apple Secure Enclave provenance. No verifie
 
 Do not implement `delete-all-ctk-identities` in the product.
 
-A future single-identity deletion should require this order:
+Porcelain retirement requires this order:
 
 ```text
 remove remote authorization
 → verify the old key is rejected
 → verify a replacement/break-glass key succeeds
-→ display the exact SSH fingerprint and CTK hash
+→ display the exact SSH fingerprint and CTK SHA-256/hex selector
 → explicit deletion approval
 → delete local CTK identity
 → verify absence
@@ -345,19 +312,19 @@ remove remote authorization
 
 Never infer that an identity is safe to delete merely because its certificate appears expired. Verify the real SSH authorization state.
 
-## Suggested first milestone
+## Implemented command surface
 
-Deliver a non-destructive Swift package first:
+The package currently includes:
 
 1. `doctor` with human and JSON output;
 2. a reusable, tested subprocess runner;
-3. read-only CTK identity listing and normalized model;
+3. CTK identity listing and normalized SHA-256/SHA-1/SSH identifiers;
 4. fixture tests for `sc_auth` outputs, including labels with spaces and Unicode;
 5. provider signature/path/version checks;
 6. SSH configuration rendering without modifying user files;
-7. a documented opt-in integration-test harness.
+7. create, wrapper install, local/remote verification, native single-identity deletion, and guarded retirement commands.
 
-Then add one canary-only create/install/verify vertical slice. Do not add deletion in the same milestone.
+These paths are unit-tested with fake system processes. The `-t none` path also has physical-Mac evidence for creation, multiple-identity wrapper selection, local and unlocked-GUI SSH-session signing, localhost authentication, revocation, recovery, and deletion. The `-t bio` path and remaining locked/logged-out/reboot/launchd contexts are still unverified.
 
 ## Required test classes
 
@@ -437,4 +404,4 @@ If the coding environment provides equivalent workflows, use:
 
 ## Immediate next action for the implementation agent
 
-Create a Swift package and implement only the non-destructive first milestone. Before choosing a parser strategy, capture and redact representative `sc_auth list-ctk-identities -t ssh` output fixtures from controlled test identities or synthetic fixtures. Do not design parsing around whitespace splitting without tests for labels containing spaces.
+Extend the physical-Mac matrix to locked-console, logged-out, reboot-before-first-unlock, and launchd contexts. Run `-t bio` separately with an operator present for LocalAuthentication prompts.

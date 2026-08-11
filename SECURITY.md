@@ -2,18 +2,22 @@
 
 Please report vulnerabilities privately through GitHub's security advisory
 feature for this repository. Do not include real private keys, wrapper files,
-Keychain exports, webhook secrets, identity inventories, or production host data
+Keychain exports, identity inventories, or production host data
 in a report.
 
-The current executable is read-only. It does not modify `~/.ssh`, Keychain/CTK
-identities, SSH agent state, shell profiles, or remote authorization. A report
-from `identity list` still contains identity metadata and should be redacted
-before sharing.
+The executable can create, delete, or retire one CTK identity and install a wrapper only
+when those commands and their explicit confirmation or safety flags are supplied. It does not
+import/export identities, bulk-delete identities, edit `~/.ssh/config`, change
+SSH agent or shell-profile state, or modify remote authorization. Output from
+`identity list` still contains identity metadata and should be redacted before
+sharing.
 
-Security-sensitive future changes require tests at the system boundary and an
-explicit physical-Mac integration run. In particular, identity creation,
-wrapper installation, signing, webhook networking/authentication, outbox
-persistence, retry, and deletion must not be inferred as covered by hosted CI.
+Wrapper passphrases are read twice from the controlling terminal with echo
+disabled. They are not accepted in command arguments or environment variables.
+
+Identity creation, wrapper installation, signing, remote authentication, and
+deletion require an explicit physical-Mac integration run and must not be
+inferred as covered by hosted CI or mock-based unit tests.
 
 See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the current trust boundaries
 and residual risks.

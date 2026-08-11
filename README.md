@@ -1,27 +1,36 @@
 # se-sshctl
 
-`se-sshctl` is a dependency-free Swift foundation for inspecting Apple's
-CryptoTokenKit-backed SSH path on macOS. This first slice is deliberately
-read-only: it cannot create, import, export, install, retire, or delete an
-identity.
+`se-sshctl` is a dependency-free Swift CLI for managing and verifying Apple's
+CryptoTokenKit-backed Secure Enclave SSH identities on macOS.
 
 ## Commands
 
 ```sh
 swift build
-swift run se-sshctl doctor --json
-swift run se-sshctl identity list --json
+swift run se-sshctl --help
 swift test
 ```
 
-Both commands emit deterministic, schema-versioned JSON (`schemaVersion: 1`).
-`doctor` reports the macOS version/build, architecture, system OpenSSH version,
-fixed system-tool paths, and whether `/usr/lib/ssh-keychain.dylib` has a valid
-Apple-anchored designated requirement. `identity list` invokes only:
+The CLI supports:
 
-```text
-/usr/sbin/sc_auth list-ctk-identities -t sha256 -e hex
-```
+- environment and provider diagnostics;
+- human and schema-versioned JSON identity listing using native `-t sha1|sha256|ssh` and `-e hex|b64` values;
+- plumbing identity creation using sc_auth's `-l`, `-k p-256-ne`, and `-t bio|none` vocabulary;
+- collision-safe resident-wrapper installation selected by SSH fingerprint;
+- SSH config rendering without modifying user files;
+- local signing and remote authentication verification;
+- native SHA-1 single-identity deletion and policy-bearing retirement, both with post-delete verification.
+
+Run any command with `--help` for its arguments and security effects. Creation
+with `-t none` requires `--allow-unattended-signing`. Plumbing deletion preserves
+`sc_auth delete-ctk-identity -h` SHA-1 semantics and requires the exact hash twice;
+porcelain retirement selects by CTK SHA-256 hash and additionally requires remote
+revocation and recovery-access acknowledgements. Labels never select a mutating
+target, and there is no bulk-delete command.
+
+`wrapper install` reads the wrapper passphrase twice from the controlling
+terminal with echo disabled, following `ssh-keygen` behavior. Two empty entries
+select no passphrase; the passphrase is never accepted through argv or environment.
 
 The table parser uses header column boundaries, preserving spaces, Unicode, and
 shell metacharacters in labels. Unknown/localized headers and malformed or extra
@@ -29,13 +38,21 @@ columns are errors rather than guessed formats. Invoking `identity list` prints
 the current user's identity metadata; use it only when that disclosure is
 intended.
 
+## Command layers
+
+Plumbing preserves native `sc_auth`, `ssh-keygen`, and SSH vocabulary while
+enforcing the SSH-only scope and safety invariants. Porcelain may compose those
+commands into user-defined workflows; today `identity retire` is the only porcelain
+command. See [ADR 0001](docs/adr/0001-plumbing-preserves-native-vocabulary.md)
+and the [domain language](CONTEXT.md).
+
 ## Security meaning
 
-The intended future profiles remain:
+The low-level creation parameters are:
 
 ```text
-interactive = p-256-ne + bio
-remote      = p-256-ne + none
+-k p-256-ne -t bio
+-k p-256-ne -t none --allow-unattended-signing
 ```
 
 `p-256-ne` means the private key is non-exportable. `none` removes per-use user
@@ -43,37 +60,19 @@ authentication; it is not TTY authentication and does not replace Touch ID with
 a password. Code running as the user may request signatures without approval.
 See [the threat model](docs/THREAT_MODEL.md).
 
-## `ssh.key.created` v1 foundation
-
-`SSHCTLCore` defines the schema-versioned event, an injectable
-`WebhookDelivering` protocol, and an explicit post-creation outcome:
-
-- delivery succeeds: `succeeded` / `delivered`;
-- delivery is not configured: `succeeded` / `not-configured`;
-- delivery fails after verified creation: `partial-success` / `pending`, with a
-  non-secret v1 outbox record and the same idempotent `eventId`.
-
-The event can contain only the label, key type/protection, CTK public-key hash,
-SSH fingerprint, public key, and local-signing result. Its type has no fields for
-private material, wrapper contents, Keychain data, credentials, tokens, or
-environment data.
-
-There is intentionally no HTTP client and no CLI webhook wiring yet. Live
-delivery must wait for a separately verified create/discover/wrapper/fingerprint/
-local-signing transaction. Before enabling it, the project must decide the HTTPS
-endpoint configuration, bounded timeouts, HMAC headers and secret source, retry
-policy, and restrictive outbox location. The unit test path uses an injected mock
-sink and opens no network socket:
-
-```sh
-swift test --filter WebhookTests
-```
+The CLI owns local Secure Enclave SSH identity management and verification only.
+It emits machine-readable public-key metadata for external tools but does not
+deliver events or integrate with remote automation services.
 
 ## CI and hardware boundary
 
 GitHub Actions runs on `macos-latest`, prints `sw_vers`, architecture, Swift, and
-OpenSSH versions, then builds, runs all tests/fixtures, and performs read-only JSON
+OpenSSH versions, then builds, runs all tests/fixtures, and performs non-mutating JSON
 smoke checks. This does **not** verify Secure Enclave key creation, provider-backed
 signing, biometric behavior, remote/headless sessions, or OpenSSH server
 user-presence policy. Those behaviors require separately approved tests on a
 controlled physical Mac and are never part of the default suite.
+
+See [the physical-Mac verification record](docs/HARDWARE_VERIFICATION.md) for the
+tested create/install/sign/authenticate/revoke/delete canary flow and remaining
+session-context gaps.

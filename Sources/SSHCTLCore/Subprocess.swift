@@ -1,9 +1,11 @@
+import Darwin
 import Foundation
 
 public enum SystemExecutable: String, Codable, CaseIterable, Sendable {
     case codesign = "/usr/bin/codesign"
     case scAuth = "/usr/sbin/sc_auth"
     case ssh = "/usr/bin/ssh"
+    case sshKeygen = "/usr/bin/ssh-keygen"
     case swVers = "/usr/bin/sw_vers"
     case uname = "/usr/bin/uname"
 
@@ -15,6 +17,7 @@ public struct SubprocessRequest: Equatable, Sendable {
     public let arguments: [String]
     public let environment: [String: String]
     public let currentDirectoryURL: URL?
+    public let standardInput: Data?
     public let timeout: TimeInterval
 
     public init(
@@ -22,12 +25,14 @@ public struct SubprocessRequest: Equatable, Sendable {
         arguments: [String] = [],
         environment: [String: String] = [:],
         currentDirectoryURL: URL? = nil,
+        standardInput: Data? = nil,
         timeout: TimeInterval = 10
     ) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.currentDirectoryURL = currentDirectoryURL
+        self.standardInput = standardInput
         self.timeout = timeout
     }
 }
@@ -70,9 +75,12 @@ public struct ProcessExecutor: SubprocessExecuting {
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()
+        let stdin = Pipe()
         let stdoutBuffer = LockedData()
         let stderrBuffer = LockedData()
         let reads = DispatchGroup()
+        let writes = DispatchGroup()
+        let deadline = Date().addingTimeInterval(request.timeout)
 
         process.executableURL = URL(fileURLWithPath: request.executable.path)
         process.arguments = request.arguments
@@ -80,6 +88,9 @@ public struct ProcessExecutor: SubprocessExecuting {
         process.currentDirectoryURL = request.currentDirectoryURL
         process.standardOutput = stdout
         process.standardError = stderr
+        if request.standardInput != nil {
+            process.standardInput = stdin
+        }
 
         reads.enter()
         DispatchQueue.global().async {
@@ -101,7 +112,17 @@ public struct ProcessExecutor: SubprocessExecuting {
             throw error
         }
 
-        let deadline = Date().addingTimeInterval(request.timeout)
+        if let input = request.standardInput {
+            let handle = stdin.fileHandleForWriting
+            _ = fcntl(handle.fileDescriptor, F_SETNOSIGPIPE, 1)
+            writes.enter()
+            DispatchQueue.global().async {
+                try? handle.write(contentsOf: input)
+                handle.closeFile()
+                writes.leave()
+            }
+        }
+
         while process.isRunning && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.01)
         }
@@ -111,6 +132,7 @@ public struct ProcessExecutor: SubprocessExecuting {
         }
         process.waitUntilExit()
         reads.wait()
+        writes.wait()
 
         return SubprocessResult(
             stdout: stdoutBuffer.string,

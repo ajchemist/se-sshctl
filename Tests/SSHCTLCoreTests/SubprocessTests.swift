@@ -30,6 +30,24 @@ import Testing
     #expect(executor.requests.map(\.executable) == [.ssh])
 }
 
+@Test func subprocessTimeoutIncludesBlockedStandardInputWrite() throws {
+    let started = Date()
+    let result = try ProcessExecutor().run(SubprocessRequest(
+        executable: .ssh,
+        arguments: [
+            "-F", "none",
+            "-o", "BatchMode=yes",
+            "-o", "ProxyCommand=/bin/sleep 1",
+            "example.invalid",
+        ],
+        standardInput: Data(repeating: 65, count: 2 * 1024 * 1024),
+        timeout: 0.05
+    ))
+
+    #expect(result.timedOut)
+    #expect(Date().timeIntervalSince(started) < 0.5)
+}
+
 final class FakeSubprocessExecutor: SubprocessExecuting {
     private(set) var requests: [SubprocessRequest] = []
     private var results: [Result<SubprocessResult, Error>]

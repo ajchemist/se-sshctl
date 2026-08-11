@@ -32,6 +32,46 @@ public struct DoctorReport: Codable, Equatable, Sendable {
     public let provider: ProviderReport
 }
 
+public struct ProviderInspector {
+    private let executor: any SubprocessExecuting
+    private let pathExists: (String) -> Bool
+
+    public init(
+        executor: any SubprocessExecuting,
+        pathExists: @escaping (String) -> Bool = FileManager.default.fileExists(atPath:)
+    ) {
+        self.executor = executor
+        self.pathExists = pathExists
+    }
+
+    public func report() throws -> ProviderReport {
+        let path = "/usr/lib/ssh-keychain.dylib"
+        let available = pathExists(path)
+        let verification = available
+            ? try executor.run(SubprocessRequest(executable: .codesign, arguments: ["--verify", "--strict", path]))
+            : nil
+        let signatureValid = verification.map {
+            !$0.timedOut && $0.terminationReason == .exit && $0.exitStatus == 0
+        } ?? false
+        let requirementResult = available
+            ? try executor.run(SubprocessRequest(executable: .codesign, arguments: ["-dr", "-", path]))
+            : nil
+        let requirement = requirementResult.flatMap {
+            guard !$0.timedOut, $0.terminationReason == .exit, $0.exitStatus == 0 else { return nil }
+            return ($0.stdout.isEmpty ? $0.stderr : $0.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
+        } ?? ""
+        return ProviderReport(
+            path: path,
+            available: available,
+            signatureValid: signatureValid,
+            appleAnchored: requirement.contains("anchor apple"),
+            identifier: requirement.contains(#"identifier "com.apple.ssh-keychain""#)
+                ? "com.apple.ssh-keychain"
+                : nil
+        )
+    }
+}
+
 public struct Doctor {
     private let executor: any SubprocessExecuting
     private let pathExists: (String) -> Bool
@@ -45,18 +85,10 @@ public struct Doctor {
     }
 
     public func report() throws -> DoctorReport {
-        let providerPath = "/usr/lib/ssh-keychain.dylib"
         let version = try successfulOutput(SubprocessRequest(executable: .swVers, arguments: ["-productVersion"]))
         let build = try successfulOutput(SubprocessRequest(executable: .swVers, arguments: ["-buildVersion"]))
         let architecture = try successfulOutput(SubprocessRequest(executable: .uname, arguments: ["-m"]))
         let sshVersion = try successfulOutput(SubprocessRequest(executable: .ssh, arguments: ["-V"]))
-        let providerAvailable = pathExists(providerPath)
-        let signatureValid = providerAvailable
-            ? try succeeds(SubprocessRequest(executable: .codesign, arguments: ["--verify", "--strict", providerPath]))
-            : false
-        let requirement = providerAvailable
-            ? try successfulOutput(SubprocessRequest(executable: .codesign, arguments: ["-dr", "-", providerPath]))
-            : ""
         return DoctorReport(
             schemaVersion: 1,
             platform: PlatformReport(version: version, build: build, architecture: architecture),
@@ -66,13 +98,7 @@ public struct Doctor {
                 available: pathExists(SystemExecutable.ssh.path),
                 version: sshVersion
             ),
-            provider: ProviderReport(
-                path: providerPath,
-                available: providerAvailable,
-                signatureValid: signatureValid,
-                appleAnchored: requirement.contains("anchor apple"),
-                identifier: requirement.contains(#"identifier "com.apple.ssh-keychain""#) ? "com.apple.ssh-keychain" : nil
-            )
+            provider: try ProviderInspector(executor: executor, pathExists: pathExists).report()
         )
     }
 
@@ -84,40 +110,56 @@ public struct Doctor {
         let output = result.stdout.isEmpty ? result.stderr : result.stdout
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-
-    private func succeeds(_ request: SubprocessRequest) throws -> Bool {
-        let result = try executor.run(request)
-        return !result.timedOut && result.terminationReason == .exit && result.exitStatus == 0
-    }
 }
 
 public struct IdentityListReport: Codable, Equatable, Sendable {
     public let schemaVersion: Int
+    public let hashType: CTKIdentityHashType
+    public let hashEncoding: CTKIdentityHashEncoding
     public let identities: [CTKIdentity]
 
-    public init(schemaVersion: Int = 1, identities: [CTKIdentity]) {
+    public init(
+        schemaVersion: Int = 2,
+        hashType: CTKIdentityHashType = .sha256,
+        hashEncoding: CTKIdentityHashEncoding = .hex,
+        identities: [CTKIdentity]
+    ) {
         self.schemaVersion = schemaVersion
+        self.hashType = hashType
+        self.hashEncoding = hashEncoding
         self.identities = identities
     }
 }
 
 public struct IdentityLister {
     private let executor: any SubprocessExecuting
+    private let hashType: CTKIdentityHashType
+    private let hashEncoding: CTKIdentityHashEncoding
 
-    public init(executor: any SubprocessExecuting) {
+    public init(
+        executor: any SubprocessExecuting,
+        hashType: CTKIdentityHashType = .sha256,
+        hashEncoding: CTKIdentityHashEncoding = .hex
+    ) {
         self.executor = executor
+        self.hashType = hashType
+        self.hashEncoding = hashEncoding
     }
 
     public func list() throws -> IdentityListReport {
         let request = SubprocessRequest(
             executable: .scAuth,
-            arguments: ["list-ctk-identities", "-t", "sha256", "-e", "hex"]
+            arguments: ["list-ctk-identities", "-t", hashType.rawValue, "-e", hashEncoding.rawValue]
         )
         let result = try executor.run(request)
         guard !result.timedOut, result.terminationReason == .exit, result.exitStatus == 0 else {
             throw ReadOnlyCommandError.commandFailed(.scAuth)
         }
-        return IdentityListReport(identities: try CTKIdentityParser().parse(result.stdout))
+        return IdentityListReport(
+            hashType: hashType,
+            hashEncoding: hashEncoding,
+            identities: try CTKIdentityParser(hashType: hashType, hashEncoding: hashEncoding).parse(result.stdout)
+        )
     }
 }
 
