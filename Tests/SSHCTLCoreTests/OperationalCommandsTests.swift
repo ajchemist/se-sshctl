@@ -32,7 +32,7 @@ import Testing
     #expect(download.environment["SSH_ASKPASS"] == Bundle.main.executableURL!.path)
     #expect(download.environment["SE_SSHCTL_ASKPASS_MODE"] == "1")
     #expect(download.environment["SE_SSHCTL_ASKPASS_FIFO"] == nil)
-    #expect(download.standardInput == Data("0\n\n\n".utf8))
+    #expect(download.standardInput == taggedDownloadInput(pin: Data("0".utf8), passphrase: Data()))
     #expect(throws: OperationalCommandError.destinationExists) {
         try WrapperInstaller(executor: executor).install(
             ctkSHA256: hash, destination: destination, passphrase: Data()
@@ -69,7 +69,10 @@ import Testing
     )
 
     let download = executor.requests.first { $0.arguments.first == "-K" }!
-    #expect(download.standardInput == Data("0\ntest passphrase\ntest passphrase\n".utf8))
+    #expect(download.standardInput == taggedDownloadInput(
+        pin: Data("0".utf8),
+        passphrase: Data("test passphrase".utf8)
+    ))
     #expect(!download.environment.values.contains("test passphrase"))
 }
 
@@ -86,7 +89,7 @@ import Testing
     )
 
     let download = executor.requests.first { $0.arguments.first == "-K" }!
-    #expect(download.standardInput == Data("\n\n\n".utf8))
+    #expect(download.standardInput == taggedDownloadInput(pin: Data(), passphrase: Data()))
 }
 
 @Test func wrapperInstallReportsOpenSSHTimeout() {
@@ -99,6 +102,22 @@ import Testing
             ctkSHA256: hash,
             destination: root.appendingPathComponent("identity"),
             passphrase: Data()
+        )
+    }
+}
+
+@Test func wrapperInstallRejectsAskPassProtocolFailureEvenWhenOpenSSHSucceeds() {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(throws: OperationalCommandError.commandFailed(
+        "native askpass rejected an unexpected OpenSSH prompt"
+    )) {
+        try WrapperInstaller(executor: OperationalExecutor(askPassFailed: true)).install(
+            ctkSHA256: hash,
+            destination: root.appendingPathComponent("identity"),
+            passphrase: Data("expected passphrase".utf8)
         )
     }
 }
@@ -117,8 +136,12 @@ import Testing
 
     let downloads = executor.requests.filter { $0.arguments.first == "-K" }
     #expect(downloads.count == 2)
-    #expect(downloads[0].standardInput == Data("0\n\n\ny\n".utf8))
-    #expect(downloads[1].standardInput == Data("0\n\n\nn\n".utf8))
+    var lastIdentityInput = taggedDownloadInput(pin: Data("0".utf8), passphrase: Data())
+    lastIdentityInput.append(Data("y\n".utf8))
+    var firstIdentityInput = taggedDownloadInput(pin: Data("0".utf8), passphrase: Data())
+    firstIdentityInput.append(Data("n\n".utf8))
+    #expect(downloads[0].standardInput == lastIdentityInput)
+    #expect(downloads[1].standardInput == firstIdentityInput)
 }
 
 @Test func failedWrapperInstallDoesNotDeleteACompetitorInstall() {
@@ -207,6 +230,7 @@ private final class OperationalExecutor: SubprocessExecuting {
     private let racingDestination: URL?
     private let protection: String
     private let downloadTimedOut: Bool
+    private let askPassFailed: Bool
     private let identityCount: Int
     private let matchingDownloadAttempt: Int
     private var downloadAttempt = 0
@@ -216,6 +240,7 @@ private final class OperationalExecutor: SubprocessExecuting {
         racingDestination: URL? = nil,
         protection: String = "none",
         downloadTimedOut: Bool = false,
+        askPassFailed: Bool = false,
         identityCount: Int = 1,
         matchingDownloadAttempt: Int = 1
     ) {
@@ -223,6 +248,7 @@ private final class OperationalExecutor: SubprocessExecuting {
         self.racingDestination = racingDestination
         self.protection = protection
         self.downloadTimedOut = downloadTimedOut
+        self.askPassFailed = askPassFailed
         self.identityCount = identityCount
         self.matchingDownloadAttempt = matchingDownloadAttempt
     }
@@ -254,7 +280,14 @@ private final class OperationalExecutor: SubprocessExecuting {
             try Data("wrapper".utf8).write(to: directory.appendingPathComponent("id_test"))
             try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
                 .write(to: directory.appendingPathComponent("id_test.pub"))
-            return operationalResult()
+            let askPassResult = askPassFailed
+                ? AskPassResponder.failureMarker
+                : """
+                  \(AskPassResponder.successMarker):pin
+                  \(AskPassResponder.successMarker):passphrase
+                  \(AskPassResponder.successMarker):passphrase
+                  """
+            return operationalResult(stderr: askPassResult)
         }
         if request.arguments.first == "-l" {
             if let racingDestination {
@@ -276,6 +309,13 @@ private final class OperationalExecutor: SubprocessExecuting {
 }
 
 private let sshFingerprint = "SHA256:" + String(repeating: "C", count: 43)
+
+private func taggedDownloadInput(pin: Data, passphrase: Data) -> Data {
+    var input = AskPassResponder.pinReply(pin)
+    input.append(AskPassResponder.passphraseReply(passphrase))
+    input.append(AskPassResponder.passphraseReply(passphrase))
+    return input
+}
 
 private func identityTable(
     hashType: String,

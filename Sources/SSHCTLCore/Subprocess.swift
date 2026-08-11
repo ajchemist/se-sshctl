@@ -129,6 +129,13 @@ public struct ProcessExecutor: SubprocessExecuting {
         let timedOut = process.isRunning
         if timedOut {
             process.terminate()
+            let terminationDeadline = Date().addingTimeInterval(1)
+            while process.isRunning && Date() < terminationDeadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
         }
         process.waitUntilExit()
         reads.wait()

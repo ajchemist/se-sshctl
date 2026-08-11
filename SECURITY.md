@@ -14,8 +14,8 @@ sharing.
 
 Wrapper passphrases are read twice from the controlling terminal with echo
 disabled. They are passed to OpenSSH through an anonymous pipe and a native
-one-line askpass responder; they are not accepted in command arguments or
-environment variables and are not written to persistent files.
+prompt-validating askpass responder; they are not accepted in command arguments
+or environment variables and are not written to persistent files.
 
 Identity creation, wrapper installation, signing, remote authentication, and
 deletion require an explicit physical-Mac integration run and must not be

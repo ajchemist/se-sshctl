@@ -2,11 +2,17 @@ import Darwin
 import Foundation
 import SSHCTLCore
 
-if ProcessInfo.processInfo.environment["SE_SSHCTL_ASKPASS_MODE"] == "1" {
+if ProcessInfo.processInfo.environment["SE_SSHCTL_ASKPASS_MODE"] == "1",
+   ProcessInfo.processInfo.environment["SSH_ASKPASS_REQUIRE"] == "force",
+    CommandLine.arguments.count == 2 {
     do {
-        try AskPassResponder.run()
+        let response = try AskPassResponder.run(prompt: CommandLine.arguments[1])
+        FileHandle.standardError.write(Data(
+            ("\(AskPassResponder.successMarker):\(response.rawValue)\n").utf8
+        ))
         exit(EXIT_SUCCESS)
     } catch {
+        FileHandle.standardError.write(Data((AskPassResponder.failureMarker + "\n").utf8))
         exit(EXIT_FAILURE)
     }
 }

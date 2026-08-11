@@ -119,6 +119,19 @@ public struct WrapperInstaller {
                 ),
                 timeout: 120
             ))
+            if result.timedOut { throw OperationalCommandError.commandFailed("timed out") }
+            let askPassLines = result.stderr.split(separator: "\n")
+            let passphraseMarker = Substring(
+                "\(AskPassResponder.successMarker):\(AskPassResponder.ResponseKind.passphrase.rawValue)"
+            )
+            let pinMarker = Substring(
+                "\(AskPassResponder.successMarker):\(AskPassResponder.ResponseKind.pin.rawValue)"
+            )
+            guard !askPassLines.contains(Substring(AskPassResponder.failureMarker)),
+                  askPassLines.count(where: { $0 == passphraseMarker }) == 2,
+                  askPassLines.count(where: { $0 == pinMarker }) <= 1 else {
+                throw OperationalCommandError.commandFailed("native askpass rejected an unexpected OpenSSH prompt")
+            }
             if identityIndex == resolved.identityCount { fullDownloadResult = result }
 
             let files = try fileManager.contentsOfDirectory(
@@ -386,11 +399,9 @@ private func providerEnvironment(hash: String) -> [String: String] {
 }
 
 private func downloadInput(selecting index: Int, count: Int, protection: String, passphrase: Data) -> Data {
-    var input = Data((protection == "bio" ? "\n" : "0\n").utf8)
-    input.append(passphrase)
-    input.append(10)
-    input.append(passphrase)
-    input.append(10)
+    var input = AskPassResponder.pinReply(protection == "bio" ? Data() : Data("0".utf8))
+    input.append(AskPassResponder.passphraseReply(passphrase))
+    input.append(AskPassResponder.passphraseReply(passphrase))
     if index > 1 { input.append(Data(String(repeating: "y\n", count: index - 1).utf8)) }
     if index < count { input.append(Data("n\n".utf8)) }
     return input
