@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "orca-cli": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "skillPath": "skills/orca-cli/SKILL.md",
+      "computedHash": "7363d202b2ac29cc2a93a9819c3c7ac34ce0922942829d00543f4d853794cbba"
+    }
+  }
+}
