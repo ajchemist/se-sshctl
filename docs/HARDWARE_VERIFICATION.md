@@ -55,3 +55,27 @@ Two Apple/OpenSSH behaviors required implementation changes:
 This verifies one local and one SSH-session context with the GUI session unlocked.
 It does not yet prove behavior while the console is locked, logged out, before the
 first unlock after reboot, or under launchd.
+
+## MacBook Air Touch ID verification — 2026-08-12
+
+Verified on physical Touch ID hardware:
+
+```text
+model:     MacBook Air (MacBookAir10,1)
+chip:      Apple M1
+macOS:     26.6.1 (25G76)
+OpenSSH:   OpenSSH_10.3p1, LibreSSL 3.3.6
+provider:  /usr/lib/ssh-keychain.dylib, Apple-anchored signature verified
+source:    v0.1.4-1-gcb5247f
+params:    -k p-256-ne -t bio
+```
+
+The wizard recorded:
+
+- identity creation: passed; Touch ID prompt observed: no;
+- identity-file installation with an empty passphrase: passed; Touch ID prompt observed: no;
+- local provider-backed signing and signature verification: passed; Touch ID prompt observed: yes;
+- localhost authentication: passed; Touch ID prompt observed: yes;
+- the temporary CTK identity was deleted and local authorization was restored.
+
+This run covers an unlocked GUI session. It does not prove behavior while the console is locked, logged out, before first unlock after reboot, or under launchd.
