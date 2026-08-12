@@ -17,13 +17,13 @@ The value printed in the `Public Key Hash` column by `sc_auth list-ctk-identitie
 _Avoid_: Identity ID, fingerprint
 
 **SSH fingerprint**:
-The `SHA256:` fingerprint used to match a CTK identity, a resident-key wrapper, and remote authorization.
+The `SHA256:` fingerprint used to match a CTK identity, an identity file, and remote authorization.
 _Avoid_: CTK hash
 
-**Resident-key wrapper**:
-The OpenSSH private-key handle downloaded by `ssh-keygen -K`; it references provider-backed key operations but contains no exported Secure Enclave private key.
-_Avoid_: Private key
+**Identity file**:
+An OpenSSH private key file containing a key handle and public metadata for provider-backed operations, but no exported Secure Enclave private-key material.
+_Avoid_: Wrapper, private key
 
-**Retirement**:
-The porcelain workflow that verifies remote authorization removal and recovery access before permanently deleting one CTK identity.
-_Avoid_: Delete
+**Identity deletion**:
+Permanent removal of one CTK identity selected by its CTK SHA-256 public-key hash. Remote authorization and recovery readiness remain external operator responsibilities.
+_Avoid_: Retirement, remote revocation

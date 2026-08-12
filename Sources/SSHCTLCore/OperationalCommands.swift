@@ -5,10 +5,10 @@ private let providerPath = "/usr/lib/ssh-keychain.dylib"
 public enum OperationalCommandError: Error, LocalizedError, Equatable {
     case invalidPath
     case invalidHostPattern
-    case destinationExists
+    case identityFileExists
     case insecureDirectory
     case commandFailed(String)
-    case wrapperNotFound
+    case identityFileNotFound
     case fingerprintMismatch
     case malformedPublicKey
     case signatureNotCreated
@@ -21,22 +21,22 @@ public enum OperationalCommandError: Error, LocalizedError, Equatable {
         switch self {
         case .invalidPath: "path must be non-empty and contain no control characters"
         case .invalidHostPattern: "host pattern must be non-empty and contain no control characters"
-        case .destinationExists: "destination or its .pub file already exists"
-        case .insecureDirectory: "destination directory must not be accessible by group or other users"
+        case .identityFileExists: "identity file or its .pub file already exists"
+        case .insecureDirectory: "identity-file directory must not be accessible by group or other users"
         case let .commandFailed(detail): "OpenSSH command failed" + (detail.isEmpty ? "" : ": \(detail)")
-        case .wrapperNotFound: "ssh-keygen did not produce a matching resident-key wrapper"
-        case .fingerprintMismatch: "wrapper fingerprint does not match the selected CTK SHA-256 hash"
-        case .malformedPublicKey: "wrapper public key is malformed or has an unexpected key type"
+        case .identityFileNotFound: "ssh-keygen did not produce a matching identity file"
+        case .fingerprintMismatch: "identity file fingerprint does not match the selected CTK SHA-256 hash"
+        case .malformedPublicKey: "identity file public key is malformed or has an unexpected key type"
         case .signatureNotCreated: "ssh-keygen returned success without creating a signature"
         case .identityNotFound: "identity was not found"
         case .identityMetadataAmbiguous: "identity metadata is duplicated; refusing to guess its provider hash or SSH fingerprint"
         case .providerUntrusted: "Apple ssh-keychain provider is missing or failed signature verification"
-        case .invalidPassphrase: "wrapper passphrase must not contain NUL or line-break bytes"
+        case .invalidPassphrase: "identity file passphrase must not contain NUL or line-break bytes"
         }
     }
 }
 
-public struct WrapperInstallReport: Encodable, Equatable, Sendable {
+public struct IdentityFileInstallReport: Encodable, Equatable, Sendable {
     public let schemaVersion = 2
     public let status = "installed"
     public let hashType = CTKIdentityHashType.sha256
@@ -48,7 +48,7 @@ public struct WrapperInstallReport: Encodable, Equatable, Sendable {
     public let publicKey: String
 }
 
-public struct WrapperInstaller {
+public struct IdentityFileInstaller {
     private let executor: any SubprocessExecuting
     private let fileManager: FileManager
 
@@ -59,24 +59,24 @@ public struct WrapperInstaller {
 
     public func install(
         ctkSHA256 hash: String,
-        destination: URL,
+        identityFile: URL,
         passphrase: Data
-    ) throws -> WrapperInstallReport {
+    ) throws -> IdentityFileInstallReport {
         let normalized = try normalizedCTKSHA256(hash)
         guard !passphrase.contains(0), !passphrase.contains(10), !passphrase.contains(13) else {
             throw OperationalCommandError.invalidPassphrase
         }
-        let destination = destination.standardizedFileURL
-        try validatePath(destination.path)
-        let publicDestination = URL(fileURLWithPath: destination.path + ".pub")
-        guard !fileManager.fileExists(atPath: destination.path),
-              !fileManager.fileExists(atPath: publicDestination.path) else {
-            throw OperationalCommandError.destinationExists
+        let identityFile = identityFile.standardizedFileURL
+        try validatePath(identityFile.path)
+        let publicKeyFile = URL(fileURLWithPath: identityFile.path + ".pub")
+        guard !fileManager.fileExists(atPath: identityFile.path),
+              !fileManager.fileExists(atPath: publicKeyFile.path) else {
+            throw OperationalCommandError.identityFileExists
         }
         try requireTrustedProvider(executor: executor, fileManager: fileManager)
         let resolved = try IdentityResolver(executor: executor).resolve(ctkSHA256: normalized)
 
-        let parent = destination.deletingLastPathComponent()
+        let parent = identityFile.deletingLastPathComponent()
         try preparePrivateDirectory(parent)
         let temporary = parent.appendingPathComponent(".se-sshctl-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(
@@ -89,7 +89,7 @@ public struct WrapperInstaller {
             throw OperationalCommandError.commandFailed("unable to resolve native askpass executable")
         }
 
-        var match: (wrapper: URL, publicKey: URL, line: String)?
+        var match: (identityFile: URL, publicKey: URL, line: String)?
         var fullDownloadResult: SubprocessResult?
         // ponytail: -K ignores the provider filter on macOS 26.6.1, so retry by
         // overwrite position; replace with one PTY capture if large inventories make this slow.
@@ -139,10 +139,10 @@ public struct WrapperInstaller {
                 includingPropertiesForKeys: [.isRegularFileKey],
                 options: [.skipsHiddenFiles]
             )
-            var attemptMatch: (wrapper: URL, publicKey: URL, line: String)?
+            var attemptMatch: (identityFile: URL, publicKey: URL, line: String)?
             for publicKeyURL in files where publicKeyURL.pathExtension == "pub" {
-                let wrapperURL = publicKeyURL.deletingPathExtension()
-                guard fileManager.fileExists(atPath: wrapperURL.path) else { continue }
+                let identityFileURL = publicKeyURL.deletingPathExtension()
+                guard fileManager.fileExists(atPath: identityFileURL.path) else { continue }
                 let fingerprintResult = try executor.run(SubprocessRequest(
                     executable: .sshKeygen,
                     arguments: ["-l", "-E", "sha256", "-f", publicKeyURL.path]
@@ -150,8 +150,8 @@ public struct WrapperInstaller {
                 try requireOperationalSuccess(fingerprintResult)
                 guard fingerprint(in: fingerprintResult.stdout) == resolved.sshFingerprint else { continue }
                 let line = try validatedPublicKey(at: publicKeyURL)
-                guard attemptMatch == nil else { throw OperationalCommandError.wrapperNotFound }
-                attemptMatch = (wrapperURL, publicKeyURL, line)
+                guard attemptMatch == nil else { throw OperationalCommandError.identityFileNotFound }
+                attemptMatch = (identityFileURL, publicKeyURL, line)
             }
             if let attemptMatch {
                 match = attemptMatch
@@ -161,28 +161,28 @@ public struct WrapperInstaller {
         if match == nil, let fullDownloadResult {
             try requireOperationalSuccess(fullDownloadResult)
         }
-        guard let match else { throw OperationalCommandError.wrapperNotFound }
+        guard let match else { throw OperationalCommandError.identityFileNotFound }
 
-        var installedWrapper = false
+        var installedIdentityFile = false
         var installedPublicKey = false
         do {
-            try fileManager.moveItem(at: match.wrapper, to: destination)
-            installedWrapper = true
-            try fileManager.setAttributes([.posixPermissions: 0o400], ofItemAtPath: destination.path)
-            try fileManager.moveItem(at: match.publicKey, to: publicDestination)
+            try fileManager.moveItem(at: match.identityFile, to: identityFile)
+            installedIdentityFile = true
+            try fileManager.setAttributes([.posixPermissions: 0o400], ofItemAtPath: identityFile.path)
+            try fileManager.moveItem(at: match.publicKey, to: publicKeyFile)
             installedPublicKey = true
-            try fileManager.setAttributes([.posixPermissions: 0o444], ofItemAtPath: publicDestination.path)
+            try fileManager.setAttributes([.posixPermissions: 0o444], ofItemAtPath: publicKeyFile.path)
         } catch {
-            if installedWrapper { try? fileManager.removeItem(at: destination) }
-            if installedPublicKey { try? fileManager.removeItem(at: publicDestination) }
+            if installedIdentityFile { try? fileManager.removeItem(at: identityFile) }
+            if installedPublicKey { try? fileManager.removeItem(at: publicKeyFile) }
             throw error
         }
 
-        return WrapperInstallReport(
+        return IdentityFileInstallReport(
             ctkPublicKeyHash: normalized,
             sshFingerprint: resolved.sshFingerprint,
-            identityFile: destination.path,
-            publicKeyFile: publicDestination.path,
+            identityFile: identityFile.path,
+            publicKeyFile: publicKeyFile.path,
             publicKey: match.line
         )
     }
@@ -245,14 +245,14 @@ public struct LocalVerifier {
         self.fileManager = fileManager
     }
 
-    public func verify(ctkSHA256 hash: String, wrapper: URL) throws -> VerificationReport {
+    public func verify(ctkSHA256 hash: String, identityFile: URL) throws -> VerificationReport {
         let normalized = try normalizedCTKSHA256(hash)
-        let wrapper = wrapper.standardizedFileURL
-        try validatePath(wrapper.path)
-        let publicKeyURL = URL(fileURLWithPath: wrapper.path + ".pub")
-        guard fileManager.fileExists(atPath: wrapper.path),
+        let identityFile = identityFile.standardizedFileURL
+        try validatePath(identityFile.path)
+        let publicKeyURL = URL(fileURLWithPath: identityFile.path + ".pub")
+        guard fileManager.fileExists(atPath: identityFile.path),
               fileManager.fileExists(atPath: publicKeyURL.path) else {
-            throw OperationalCommandError.wrapperNotFound
+            throw OperationalCommandError.identityFileNotFound
         }
         try requireTrustedProvider(executor: executor, fileManager: fileManager)
         let resolved = try IdentityResolver(executor: executor).resolve(ctkSHA256: normalized)
@@ -280,7 +280,7 @@ public struct LocalVerifier {
         let environment = providerEnvironment(hash: resolved.providerHash)
         try requireOperationalSuccess(executor.run(SubprocessRequest(
             executable: .sshKeygen,
-            arguments: ["-Y", "sign", "-f", wrapper.path, "-n", "se-sshctl", challenge.path],
+            arguments: ["-Y", "sign", "-f", identityFile.path, "-n", "se-sshctl", challenge.path],
             environment: environment,
             timeout: 120
         )))
@@ -314,16 +314,16 @@ public struct RemoteVerifier {
         self.fileManager = fileManager
     }
 
-    public func verify(ctkSHA256 hash: String, wrapper: String, target: String) throws -> VerificationReport {
+    public func verify(ctkSHA256 hash: String, identityFile: String, target: String) throws -> VerificationReport {
         let normalized = try normalizedCTKSHA256(hash)
-        try validatePath(wrapper)
+        try validatePath(identityFile)
         guard !target.isEmpty, !target.hasPrefix("-"),
               !target.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains) else {
             throw OperationalCommandError.invalidHostPattern
         }
-        let publicKeyPath = wrapper + ".pub"
-        guard fileManager.fileExists(atPath: wrapper), fileManager.fileExists(atPath: publicKeyPath) else {
-            throw OperationalCommandError.wrapperNotFound
+        let publicKeyPath = identityFile + ".pub"
+        guard fileManager.fileExists(atPath: identityFile), fileManager.fileExists(atPath: publicKeyPath) else {
+            throw OperationalCommandError.identityFileNotFound
         }
         try requireTrustedProvider(executor: executor, fileManager: fileManager)
         let resolved = try IdentityResolver(executor: executor).resolve(ctkSHA256: normalized)
@@ -353,7 +353,7 @@ public struct RemoteVerifier {
                 "-o", "PreferredAuthentications=publickey",
                 "-o", "PubkeyAuthentication=yes",
                 "-o", "SecurityKeyProvider=\(providerPath)",
-                "-o", "IdentityFile=\(wrapper)",
+                "-o", "IdentityFile=\(identityFile)",
                 "--", target, "true",
             ],
             environment: providerEnvironment(hash: resolved.providerHash),

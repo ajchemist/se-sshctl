@@ -9,17 +9,9 @@ public struct IdentityCreateReport: Encodable, Equatable, Sendable {
     public let identity: CTKIdentity
 }
 
-public struct CTKIdentityDeleteReport: Encodable, Equatable, Sendable {
-    public let schemaVersion = 1
-    public let status = "deleted"
-    public let hashType = CTKIdentityHashType.sha1
-    public let hashEncoding = CTKIdentityHashEncoding.hex
-    public let ctkPublicKeyHash: String
-}
-
-public struct IdentityRetireReport: Encodable, Equatable, Sendable {
+public struct IdentityDeleteReport: Encodable, Equatable, Sendable {
     public let schemaVersion = 2
-    public let status = "retired"
+    public let status = "deleted"
     public let hashType = CTKIdentityHashType.sha256
     public let hashEncoding = CTKIdentityHashEncoding.hex
     public let ctkPublicKeyHash: String
@@ -30,7 +22,6 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
     case unsupportedKeyType
     case invalidProtection
     case invalidHash
-    case invalidDeletionHash
     case unattendedSigningNotAcknowledged
     case operationBusy
     case commandFailed(String)
@@ -39,7 +30,6 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
     case identityNotFound
     case identityMetadataAmbiguous
     case confirmationMismatch
-    case retirementSafetyNotAcknowledged
     case deletionNotVerified
 
     public var errorDescription: String? {
@@ -52,8 +42,6 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
             "-t must be bio or none"
         case .invalidHash:
             "CTK SHA-256 hash must be exactly 64 hexadecimal characters"
-        case .invalidDeletionHash:
-            "sc_auth -h must be exactly 40 hexadecimal SHA-1 characters"
         case .unattendedSigningNotAcknowledged:
             "-t none requires --allow-unattended-signing"
         case .operationBusy:
@@ -70,8 +58,6 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
             "identity metadata is duplicated; refusing to guess its deletion hash"
         case .confirmationMismatch:
             "--confirm must exactly match the selected hash"
-        case .retirementSafetyNotAcknowledged:
-            "retirement requires --remote-authorization-cleared and --recovery-access-verified"
         case .deletionNotVerified:
             "deletion returned success but the identity is still present"
         }
@@ -127,7 +113,7 @@ public struct IdentityCreator {
     }
 }
 
-public struct CTKIdentityDeleter {
+public struct IdentityDeleter {
     private let executor: any SubprocessExecuting
     private let lockDirectory: URL
 
@@ -136,43 +122,9 @@ public struct CTKIdentityDeleter {
         self.lockDirectory = lockDirectory ?? defaultLockDirectory
     }
 
-    public func delete(hash: String, confirmation: String) throws -> CTKIdentityDeleteReport {
-        let normalized = try normalizedDeletionHash(hash)
-        guard confirmation == hash else { throw IdentityLifecycleError.confirmationMismatch }
-
-        let lock = try OperationLock(directory: lockDirectory)
-        defer { withExtendedLifetime(lock) {} }
-        let identities = try IdentityLister(
-            executor: executor, hashType: .sha1, hashEncoding: .hex
-        ).list().identities
-        guard identities.contains(where: { $0.ctkPublicKeyHash.uppercased() == normalized }) else {
-            throw IdentityLifecycleError.identityNotFound
-        }
-        try deleteAndVerify(sha1Hash: normalized, executor: executor)
-        return CTKIdentityDeleteReport(ctkPublicKeyHash: normalized)
-    }
-}
-
-public struct IdentityRetirer {
-    private let executor: any SubprocessExecuting
-    private let lockDirectory: URL
-
-    public init(executor: any SubprocessExecuting, lockDirectory: URL? = nil) {
-        self.executor = executor
-        self.lockDirectory = lockDirectory ?? defaultLockDirectory
-    }
-
-    public func retire(
-        ctkSHA256 hash: String,
-        confirmation: String,
-        remoteAuthorizationCleared: Bool,
-        recoveryAccessVerified: Bool
-    ) throws -> IdentityRetireReport {
+    public func delete(ctkSHA256 hash: String, confirmation: String) throws -> IdentityDeleteReport {
         let normalized = try normalizedCTKSHA256(hash)
         guard confirmation == hash else { throw IdentityLifecycleError.confirmationMismatch }
-        guard remoteAuthorizationCleared, recoveryAccessVerified else {
-            throw IdentityLifecycleError.retirementSafetyNotAcknowledged
-        }
 
         let lock = try OperationLock(directory: lockDirectory)
         defer { withExtendedLifetime(lock) {} }
@@ -187,11 +139,21 @@ public struct IdentityRetirer {
         guard deletionCandidates.count == 1 else {
             throw IdentityLifecycleError.identityMetadataAmbiguous
         }
-        try deleteAndVerify(
-            sha1Hash: deletionCandidates[0].ctkPublicKeyHash.uppercased(),
-            executor: executor
-        )
-        return IdentityRetireReport(ctkPublicKeyHash: normalized)
+        let sha1Hash = deletionCandidates[0].ctkPublicKeyHash.uppercased()
+        try requireSuccess(executor.run(SubprocessRequest(
+            executable: .scAuth,
+            arguments: ["delete-ctk-identity", "-h", sha1Hash],
+            timeout: 30
+        )))
+        let remainingSHA1 = try IdentityLister(
+            executor: executor, hashType: .sha1, hashEncoding: .hex
+        ).list().identities
+        let remainingSHA256 = try IdentityLister(executor: executor).list().identities
+        guard !remainingSHA1.contains(where: { $0.ctkPublicKeyHash.uppercased() == sha1Hash }),
+              !remainingSHA256.contains(where: { $0.ctkPublicKeyHash.uppercased() == normalized }) else {
+            throw IdentityLifecycleError.deletionNotVerified
+        }
+        return IdentityDeleteReport(ctkPublicKeyHash: normalized)
     }
 }
 
@@ -213,27 +175,6 @@ func normalizedCTKSHA256(_ hash: String) throws -> String {
         throw IdentityLifecycleError.invalidHash
     }
     return hash.uppercased()
-}
-
-private func normalizedDeletionHash(_ hash: String) throws -> String {
-    guard hash.range(of: #"^[0-9A-Fa-f]{40}$"#, options: .regularExpression) != nil else {
-        throw IdentityLifecycleError.invalidDeletionHash
-    }
-    return hash.uppercased()
-}
-
-private func deleteAndVerify(sha1Hash: String, executor: any SubprocessExecuting) throws {
-    try requireSuccess(executor.run(SubprocessRequest(
-        executable: .scAuth,
-        arguments: ["delete-ctk-identity", "-h", sha1Hash],
-        timeout: 30
-    )))
-    let after = try IdentityLister(
-        executor: executor, hashType: .sha1, hashEncoding: .hex
-    ).list().identities
-    guard !after.contains(where: { $0.ctkPublicKeyHash.uppercased() == sha1Hash }) else {
-        throw IdentityLifecycleError.deletionNotVerified
-    }
 }
 
 private func validateLabel(_ label: String) throws {

@@ -126,17 +126,17 @@ Names may be adjusted, but keep responsibilities separated:
 se-sshctl doctor [--json]
 se-sshctl identity list [-t sha1|sha256|ssh] [-e hex|b64] [--json]
 se-sshctl identity create -l LABEL -k p-256-ne -t bio|none
-se-sshctl wrapper install --ctk-sha256 SHA256 [--destination PATH]
+se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH]
 se-sshctl config render --identity-file PATH --host-pattern PATTERN
-se-sshctl verify local --ctk-sha256 SHA256 --wrapper PATH
-se-sshctl verify remote --ctk-sha256 SHA256 --wrapper PATH --target HOST
+se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH
+se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST
 ```
 
-Keep native deletion separate from porcelain retirement:
+Expose only the stable CTK SHA-256 selector for deletion; resolve the native
+`sc_auth` SHA-1 hash internally:
 
 ```text
-se-sshctl identity delete -h SHA1 --confirm SHA1
-se-sshctl identity retire --ctk-sha256 SHA256 --confirm SHA256 --remote-authorization-cleared --recovery-access-verified
+se-sshctl identity delete --ctk-sha256 SHA256 --confirm SHA256
 ```
 
 Porcelain may later name these combinations, but plumbing preserves sc_auth values:
@@ -161,7 +161,7 @@ Require an explicit acknowledgement such as `--allow-unattended-signing` before 
 
 Prefer per-process identity selection using `KEYCHAIN_CERTIFICATES` when calling the provider. Do not globally export `SSH_SK_PROVIDER` or change `.zprofile` by default.
 
-For generated SSH configuration, prefer an explicit wrapper and provider:
+For generated SSH configuration, prefer an explicit identity file and provider:
 
 ```sshconfig
 Host example-pattern
@@ -181,7 +181,7 @@ Keep these identifiers distinct:
 label                   human-readable, non-unique metadata
 CTK SHA-256/hex hash    se-sshctl operational selector
 CTK SHA-1/hex hash      sc_auth deletion and provider-selection locator
-SSH SHA-256 fingerprint wrapper/deployment/rotation/audit identity
+SSH SHA-256 fingerprint identity-file/deployment/rotation/audit identity
 ```
 
 The SSH SHA-256 fingerprint is the canonical server-facing identity; CTK SHA-256/hex is the canonical local selector. Labels may contain spaces or Unicode and may be duplicated.
@@ -219,9 +219,9 @@ The create workflow should be treated as a transaction with evidence:
 4. Invoke `sc_auth create-ctk-identity`.
 5. Record the post-create identity set.
 6. Require exactly one new identity matching the requested key type and protection.
-7. Generate resident wrapper output inside a new `0700` temporary directory.
+7. Generate identity-file output inside a new `0700` temporary directory.
 8. Inspect every generated file; do not trust default filenames.
-9. Match the new CTK identity to the OpenSSH wrapper by fingerprint.
+9. Match the new CTK identity to the OpenSSH identity file by fingerprint.
 10. Install with non-overwriting, atomic filesystem operations and restrictive permissions.
 11. Perform an actual signing test.
 12. Write the manifest only after state and fingerprint checks pass.
@@ -230,9 +230,9 @@ A command returning exit status zero is not sufficient evidence of success.
 
 If creation succeeds but a later step fails, report the exact partial state and recovery command. Do not automatically delete a newly created CTK identity as rollback without explicit approval.
 
-## Resident wrapper handling
+## Identity file handling
 
-`ssh-keygen -K` writes resident-key wrapper files in its current directory and may encounter default-name collisions when multiple identities exist.
+`ssh-keygen -K` writes resident identity files in its current directory and may encounter default-name collisions when multiple identities exist.
 
 Requirements:
 
@@ -241,13 +241,13 @@ Requirements:
 - detect prompts and timeouts;
 - never overwrite an existing file;
 - match by fingerprint, not filename or list order;
-- install the wrapper with mode `0400`, its `.pub` file with mode `0444`, and parent directory `0700`;
+- install the identity file with mode `0400`, its `.pub` file with mode `0444`, and parent directory `0700`;
 - install the public key separately;
 - use an atomic move after verification.
 
-The OpenSSH `Enter PIN for authenticator:` prompt during resident-key download may be a generic provider prompt rather than a real CTK PIN. `-N ""` controls the wrapper-file passphrase, not the Secure Enclave key’s access policy. Establish a tested non-Aqua way to handle the provider’s empty/dummy PIN prompt; do not assume it from documentation.
+The OpenSSH `Enter PIN for authenticator:` prompt during resident-key download may be a generic provider prompt rather than a real CTK PIN. `-N ""` controls the identity-file passphrase, not the Secure Enclave key’s access policy. Establish a tested non-Aqua way to handle the provider’s empty/dummy PIN prompt; do not assume it from documentation.
 
-A wrapper passphrase is not a strong gate for an underlying `none` identity because a process with provider access may rediscover the resident identity and create another wrapper. Document this honestly.
+An identity-file passphrase is not a strong gate for an underlying `none` identity because a process with provider access may rediscover the resident identity and create another identity file. Document this honestly.
 
 ## `none` and remote-session verification
 
@@ -263,7 +263,7 @@ Build an opt-in integration matrix covering:
 6. non-interactive remote command execution;
 7. a launchd/automation context if it is in scope.
 
-Record whether failure occurs in wrapper loading, provider loading, CTK lookup, signing, or server authentication.
+Record whether failure occurs in identity file loading, provider loading, CTK lookup, signing, or server authentication.
 
 Do not claim “headless supported” until this matrix has real results.
 
@@ -295,11 +295,11 @@ Treat identities created with `-t none` as device-bound machine credentials:
 
 Do not promise remote attestation of Apple Secure Enclave provenance. No verified attestation artifact has been identified in this SSH provider path.
 
-## Deletion/retirement safety
+## Deletion safety
 
 Do not implement `delete-all-ctk-identities` in the product.
 
-Porcelain retirement requires this order:
+Operators should use this order:
 
 ```text
 remove remote authorization
@@ -323,9 +323,9 @@ The package currently includes:
 4. fixture tests for `sc_auth` outputs, including labels with spaces and Unicode;
 5. provider signature/path/version checks;
 6. SSH configuration rendering without modifying user files;
-7. create, wrapper install, local/remote verification, native single-identity deletion, and guarded retirement commands.
+7. create, install, local/remote verification, and SHA-256-selected single-identity deletion commands.
 
-These paths are unit-tested with fake system processes. The `-t none` path also has physical-Mac evidence for creation, multiple-identity wrapper selection, local and unlocked-GUI SSH-session signing, localhost authentication, revocation, recovery, and deletion. The `-t bio` path and remaining locked/logged-out/reboot/launchd contexts are still unverified.
+These paths are unit-tested with fake system processes. The `-t none` path also has physical-Mac evidence for creation, multiple-identity identity file selection, local and unlocked-GUI SSH-session signing, localhost authentication, revocation, recovery, and deletion. The `-t bio` path and remaining locked/logged-out/reboot/launchd contexts are still unverified.
 
 ## Required test classes
 
@@ -336,8 +336,8 @@ These paths are unit-tested with fake system processes. The `-t none` path also 
 - unexpected extra columns and malformed rows;
 - process timeout, signal termination, and partial output;
 - concurrent create/install attempts;
-- default wrapper filename collision and overwrite prompt;
-- wrapper/CTK fingerprint mismatch;
+- default identity file filename collision and overwrite prompt;
+- identity-file/CTK fingerprint mismatch;
 - provider absent or no longer Apple-signed;
 - system SSH versus Homebrew SSH mismatch;
 - `bio` cancellation;
@@ -355,8 +355,8 @@ A canary implementation is complete only when it can demonstrate with real outpu
 - exact OS/OpenSSH/provider capabilities;
 - pre/post CTK identity diff;
 - one newly created `p-256-ne` identity with the requested protection;
-- collision-safe wrapper installation;
-- canonical fingerprint agreement among CTK listing, wrapper, and public key;
+- collision-safe identity-file installation;
+- canonical fingerprint agreement among CTK listing, identity file, and public key;
 - local provider-backed signing success;
 - remote canary authentication success or a precisely identified policy failure;
 - no Aqua prompt in the tested `none` remote path;

@@ -20,7 +20,7 @@ provider의 차이, Hacker News 토론에서 보고된 macOS/CryptoTokenKit(CTK)
   사용하도록 `IdentityAgent` 또는 `SSH_AUTH_SOCK`을 지정해야 한다.
   ([Secretive 설정 소스](https://github.com/maxgoedjen/secretive/blob/b00328674542c42c35058069122fd6e63ce2ffb4/Sources/Secretive/Views/Configuration/Instructions.swift#L16-L23),
   [SeKey 설정](https://github.com/sekey/sekey/blob/869cb896da62ad43352c99a2b7d0e1baf4b00af6/README.md#L28-L42))
-- `se-sshctl`의 wrapper 경로는 agent가 아니라
+- `se-sshctl`의 identity file 경로는 agent가 아니라
   `/usr/lib/ssh-keychain.dylib` provider가 직접 서명한다. 따라서 별도
   `IdentityAgent`는 필요하지 않지만, `IdentityFile`과
   `SecurityKeyProvider` 설정은 필요하다.
@@ -28,7 +28,7 @@ provider의 차이, Hacker News 토론에서 보고된 macOS/CryptoTokenKit(CTK)
   [`se-sshctl` 설정 렌더러](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L187-L205))
 - HN에서 드러난 가장 큰 운영 위험은 비내보내기 키의 기기 상실, 원격
   `authorized_keys` 회수, 여러 identity를 다룰 때의 provider 동작, 그리고
-  잠금·로그아웃 등 실행 문맥이다. 현재 구현은 선택·wrapper·검증·retire의
+  잠금·로그아웃 등 실행 문맥이다. 현재 구현은 선택·identity file·검증·삭제의
   일부를 다루지만, 복구/배포/CA와 잠금 상태 검증까지 제공하지는 않는다.
   ([비내보내기 키의 기기 상실](https://news.ycombinator.com/item?id=46026158),
   [현재 실기기 검증 범위](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/HARDWARE_VERIFICATION.md#L12-L38))
@@ -95,7 +95,7 @@ agent target bundle ID를 코드로 정의한다.
 
 ### `se-sshctl`
 
-`se-sshctl`은 별도 agent를 실행하지 않는다. resident-key wrapper를
+`se-sshctl`은 별도 agent를 실행하지 않는다. resident identity file을
 `IdentityFile`로 읽은 Apple OpenSSH가 `SecurityKeyProvider`로 지정한 dylib를
 호출해 CTK identity로 서명한다. OpenSSH 설정 정의에서도 `IdentityAgent`는
 agent socket, `SecurityKeyProvider`는 authenticator-hosted key의 provider라는
@@ -103,7 +103,7 @@ agent socket, `SecurityKeyProvider`는 authenticator-hosted key의 provider라�
 ([Apple OpenSSH `IdentityAgent`](https://github.com/apple-oss-distributions/OpenSSH/blob/f386b2e948280f6ecac875329c0b56020821d558/openssh/ssh_config.5#L1125-L1153),
 [Apple OpenSSH `SecurityKeyProvider`](https://github.com/apple-oss-distributions/OpenSSH/blob/f386b2e948280f6ecac875329c0b56020821d558/openssh/ssh_config.5#L1872-L1880))
 
-구현도 agent가 준 키에는 `ssh_agent_sign`을 쓰고, 그 밖의 wrapper에는
+구현도 agent가 준 키에는 `ssh_agent_sign`을 쓰고, 그 밖의 identity file에는
 `options.sk_provider`를 전달해 직접 서명하는 두 경로를 구분한다. security-key
 identity에 provider가 없으면 identity를 건너뛴다.
 ([서명 경로](https://github.com/apple-oss-distributions/OpenSSH/blob/f386b2e948280f6ecac875329c0b56020821d558/openssh/sshconnect2.c#L1210-L1261),
@@ -111,7 +111,7 @@ identity에 provider가 없으면 identity를 건너뛴다.
 
 현재 `config render`는 `IdentityFile`, `SecurityKeyProvider`,
 `IdentitiesOnly yes`, `ForwardAgent no`를 만들고 `IdentityAgent`는 만들지 않는다.
-원격 검증은 오히려 `IdentityAgent=none`으로 agent를 끄고 같은 provider+wrapper
+원격 검증은 오히려 `IdentityAgent=none`으로 agent를 끄고 같은 provider와 identity file을
 조합의 인증 성공을 검사한다. 따라서 “별도 `IdentityAgent` 불필요”는 설계
 추론뿐 아니라 현재 검증 경로의 속성이기도 하다.
 ([설정 렌더러](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L187-L205),
@@ -130,7 +130,7 @@ identity에 provider가 없으면 identity를 건너뛴다.
   운영 신호다.
   ([HN 보고](https://news.ycombinator.com/item?id=46029909))
 - P-384 non-exportable CTK identity 생성은 가능해도 `ssh-keygen -K`가 사용할
-  wrapper를 내보내지 못한다는 실험이 보고됐다. OpenSSH security-key key type은
+  identity file를 내보내지 못한다는 실험이 보고됐다. OpenSSH security-key key type은
   authenticator-hosted ECDSA/Ed25519 계열이므로, `se-sshctl`이 p-256-ne만 허용하는
   현재 범위와 부합한다.
   ([HN 실험](https://news.ycombinator.com/item?id=46027069),
@@ -139,7 +139,7 @@ identity에 provider가 없으면 identity를 건너뛴다.
   `KEYCHAIN_CERTIFICATES`가 resident download를 하나로 걸러주지 않아 여러
   identity가 같은 기본 파일명에 충돌한 동작은 이 프로젝트가 macOS 26.6.1
   실기기에서 재현했다. 현재 구현은 overwrite 위치별 격리 다운로드 후 SSH
-  fingerprint가 일치한 wrapper만 선택한다.
+  fingerprint가 일치한 identity file만 선택한다.
   ([실기기 기록](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/HARDWARE_VERIFICATION.md#L27-L34),
   [workaround 코드](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L89-L142))
 - 여러 identity 선택 실패는 gist 댓글에서도 Apple Feedback `FB21992630`으로
@@ -214,11 +214,11 @@ identity에 provider가 없으면 identity를 건너뛴다.
   않는다.
   ([HN agent confirmation 논의](https://news.ycombinator.com/item?id=46028657),
   [현재 설정 렌더러](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L187-L205))
-- wrapper에는 private key가 없다는 설명과 함께, wrapper가 identity handle이라서
+- identity file에는 private key가 없다는 설명과 함께, identity file가 identity handle이라서
   분실·노출의 기밀성보다 잘못된 키 선택과 가용성 문제가 중요하다는 논의가
   있었다. 정확한 CTK 내부 참조 수명에 관한 댓글의 추측은 검증되지 않았다.
   ([HN 논의](https://news.ycombinator.com/item?id=46028626),
-  [OpenSSH resident wrapper 생성 정의](https://github.com/apple-oss-distributions/OpenSSH/blob/f386b2e948280f6ecac875329c0b56020821d558/openssh/ssh-keygen.1#L391-L399))
+  [OpenSSH resident identity file 생성 정의](https://github.com/apple-oss-distributions/OpenSSH/blob/f386b2e948280f6ecac875329c0b56020821d558/openssh/ssh-keygen.1#L391-L399))
 - P-256/NIST curve만 현실적으로 쓰는 경로에 대한 불신과 EdDSA fault attack을
   둘러싼 반론이 있었다. 이 암호학 논쟁은 HN 주장만으로 결론내릴 수 없고,
   현재 프로젝트는 Apple provider와 OpenSSH가 실제 연동되는 p-256-ne만 목표로
@@ -238,16 +238,16 @@ identity에 provider가 없으면 identity를 건너뛴다.
 | 쟁점 | 현재 상태 | 직접 근거 |
 | --- | --- | --- |
 | identity 생성·목록·정확한 선택 | 다룸. `p-256-ne`, `bio`/`none`, pre/post diff, 엄격한 parser와 ambiguous metadata 거부 | [생성 코드](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/LifecycleCommands.swift#L81-L127), [trust boundary](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/THREAT_MODEL.md#L13-L23) |
-| 다중 identity wrapper 충돌 | 다룸. 격리된 overwrite 순회와 SSH fingerprint 일치로 선택 | [설치 코드](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L89-L142), [실기기 기록](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/HARDWARE_VERIFICATION.md#L27-L34) |
+| 다중 identity의 identity-file 충돌 | 다룸. 격리된 overwrite 순회와 SSH fingerprint 일치로 선택 | [설치 코드](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L89-L142), [실기기 기록](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/HARDWARE_VERIFICATION.md#L27-L34) |
 | shell·provider trust boundary | 다룸. 고정 절대 실행 파일과 argument array, provider signature·identifier·Apple anchor 검사 | [threat model](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/THREAT_MODEL.md#L13-L23), [provider 검사](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L388-L397) |
-| agent 없는 per-host SSH 설정 | 다룸. provider+wrapper, `IdentitiesOnly yes`, `ForwardAgent no`; global profile을 바꾸지 않음 | [설정 렌더러](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L187-L205) |
+| agent 없는 per-host SSH 설정 | 다룸. provider와 identity file, `IdentitiesOnly yes`, `ForwardAgent no`; global profile을 바꾸지 않음 | [설정 렌더러](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L187-L205) |
 | local·remote 검증 | 다룸. local sign/verify와 agent를 끈 remote 인증; unlocked GUI session의 SSH 안에서도 실기기 검증 | [원격 검증](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L295-L340), [실기기 범위](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/HARDWARE_VERIFICATION.md#L12-L25) |
-| 안전한 retire·delete | 부분적으로 다룸. exact hash, remote authorization 회수·recovery 확인, post-delete 검증은 있으나 모든 원격 서버 상태를 자동 입증하지는 못함 | [retire 코드](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/LifecycleCommands.swift#L130-L195), [residual risk](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/THREAT_MODEL.md#L40-L47) |
+| 안전한 delete | 부분적으로 다룸. CTK SHA-256 exact hash 확인, 내부 SHA-1 해석, 두 형식의 post-delete 검증은 제공하지만 원격 authorization 회수·recovery 상태는 자동 입증하지 못함 | [삭제 코드](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/LifecycleCommands.swift#L130-L195), [residual risk](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/THREAT_MODEL.md#L40-L47) |
 | `none` signing 위험 | 다룸. 사용자 승인과 문서화는 있으나 malware의 signing 요청이라는 본질적 위험은 남음 | [생성 gate](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/LifecycleCommands.swift#L90-L112), [의미](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/THREAT_MODEL.md#L25-L36) |
 | `bio`와 세션 문맥 | 미검증. locked console, logout, reboot 후 first unlock 전, launchd도 미검증 | [명시된 한계](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/HARDWARE_VERIFICATION.md#L36-L38) |
 | OS 최소 버전·system tool drift | 부분적. macOS 26.6.1은 검증했고 provider 서명은 검사하나, Sequoia/Tahoe 하한과 향후 `sc_auth` 출력·내부 도구 변화는 미확정 | [검증 환경](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/HARDWARE_VERIFICATION.md#L3-L10), [HN 상충 보고](https://news.ycombinator.com/item?id=46035493) |
 | backup·migration·iCloud sync | 제공하지 않음. non-exportable identity와 독립 break-glass key를 전제로 함 | [현재 threat model](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/THREAT_MODEL.md#L25-L36), [HN 기기 상실 지적](https://news.ycombinator.com/item?id=46026158) |
-| 원격 배포·SSH CA·KRL | 제공하지 않음. retire 시 외부 회수 완료를 사용자가 확인해야 함 | [retire gate](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/LifecycleCommands.swift#L165-L195), [HN CA/KRL 논의](https://news.ycombinator.com/item?id=46028284) |
+| 원격 배포·SSH CA·KRL | 제공하지 않음. 로컬 identity 삭제 전에 외부 회수를 사용자가 수행해야 함 | [삭제 경계](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/LifecycleCommands.swift#L130-L195), [HN CA/KRL 논의](https://news.ycombinator.com/item?id=46028284) |
 | X.509 갱신·만료 workflow | 제공하지 않음. metadata는 읽지만 CSR·certificate re-import를 관리하지 않음 | [현재 metadata 사용](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/LifecycleCommands.swift#L198-L205), [HN 갱신 설명](https://news.ycombinator.com/item?id=46031036) |
 | Touch ID prompt 신뢰·grace window | 제공하지 않음. OS UX의 residual risk이며 `bio` 실기기 검증도 남아 있음 | [HN prompt 우려](https://news.ycombinator.com/item?id=46029015), [검증 한계](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/docs/THREAT_MODEL.md#L49-L55) |
 
@@ -259,16 +259,16 @@ security-key provider로 쓰는 동일 계열이다.
 
 | 프로젝트 | 구현 범위 | `se-sshctl`과의 차이 | 직접 근거 |
 | --- | --- | --- | --- |
-| arianvp gist | 생성·목록·삭제, `ssh-keygen -K`, dummy PIN, wrapper와 agent/global `SSH_SK_PROVIDER` 사용을 설명한 최초 공개 recipe에 가깝다 | 수동 절차이며 stable wrapper 선택, strict parsing, provider trust 검사, 격리 remote verify·retire workflow가 없다 | [gist 본문](https://gist.github.com/arianvp/5f59f1783e3eaf1a2d4cd8e952bb4acf) |
-| `cavoirom/sekey-sh` | `sc_auth`로 `p-256-ne bio` 생성·목록·삭제·public key 추출을 하고 identity들을 agent에 추가한다 | shell/agent 중심이다. 여러 download 충돌을 다루지만 per-host wrapper 관리와 격리 검증·retire gate는 제공하지 않는다 | [README](https://github.com/cavoirom/sekey-sh/blob/master/README.md), [script](https://github.com/cavoirom/sekey-sh/blob/master/sekey.sh) |
-| `fyezool/ssh-apple-secure-enclave` | SwiftUI 앱으로 생성·목록·삭제·import/export와 `ssh-keygen`/`ssh-add` 통합을 제공한다 | GUI·agent/global 환경 설정 중심이며 P-384/P-521 wrapper 제한과 Process/GUI-session 우회를 자체 코드에서 처리한다. README의 최소 OS 주장은 상충하므로 플랫폼 사실로 채택하지 않는다 | [README 기능](https://github.com/fyezool/ssh-apple-secure-enclave/blob/1586d30299219429ea630f98ff33457be6b79d75/README.md#L103-L115), [제약](https://github.com/fyezool/ssh-apple-secure-enclave/blob/1586d30299219429ea630f98ff33457be6b79d75/README.md#L208-L221), [서비스 코드](https://github.com/fyezool/ssh-apple-secure-enclave/blob/1586d30299219429ea630f98ff33457be6b79d75/SecureEnclaveSSH/Services/SCAuthService.swift#L130-L245) |
-| `whitworth-org/pinentry-darwin` | `p256-ne bio`를 만들고 Apple provider로 `ssh-add`에 넣는다 | pinentry 앱의 부가 SSH identity 기능이며 agent 중심이다. stable wrapper·검증·retire 관리 도구는 아니다 | [README](https://github.com/whitworth-org/pinentry-darwin/blob/2e52c88963be96404c80232407c5632fb635264f/README.md#L36-L46), [`ssh-add` 호출](https://github.com/whitworth-org/pinentry-darwin/blob/2e52c88963be96404c80232407c5632fb635264f/Sources/SSHIdentity/SSHAddClient.swift#L4-L11) |
-| `o-az/shussh` | demo CLI로 `sc_auth` 생성·목록과 global provider 설정을 시도한다 | 코드가 label/hash 출력 수준이고 wrapper 선택·삭제·서명/remote 검증·retire가 없다 | [identity 코드](https://github.com/o-az/shussh/blob/7fc7e187b62fcbd973d9a8dcd94db445fa0dc5db/bin/keys.ts#L22-L75), [provider 설정](https://github.com/o-az/shussh/blob/7fc7e187b62fcbd973d9a8dcd94db445fa0dc5db/bin/cli.ts#L315-L350) |
-| `lstoll/keychain` | Go에서 Keychain/CTK identity 생성·삭제·CSR을 다루는 일반 library다 | CTK 인접 구현이지만 OpenSSH provider/wrapper/SSH 검증 도구는 아니다 | [CTK identity 코드](https://github.com/lstoll/keychain/blob/928e30adc4106c62d2edd144141f7bb997a9b1e5/ctk_identity.go#L15-L112) |
+| arianvp gist | 생성·목록·삭제, `ssh-keygen -K`, dummy PIN, identity file과 agent/global `SSH_SK_PROVIDER` 사용을 설명한 최초 공개 recipe에 가깝다 | 수동 절차이며 stable identity file 선택, strict parsing, provider trust 검사, 격리 remote verify와 post-delete 검증이 없다 | [gist 본문](https://gist.github.com/arianvp/5f59f1783e3eaf1a2d4cd8e952bb4acf) |
+| `cavoirom/sekey-sh` | `sc_auth`로 `p-256-ne bio` 생성·목록·삭제·public key 추출을 하고 identity들을 agent에 추가한다 | shell/agent 중심이다. 여러 download 충돌을 다루지만 per-host identity file 관리, 격리 검증, SHA-256-selected 삭제는 제공하지 않는다 | [README](https://github.com/cavoirom/sekey-sh/blob/master/README.md), [script](https://github.com/cavoirom/sekey-sh/blob/master/sekey.sh) |
+| `fyezool/ssh-apple-secure-enclave` | SwiftUI 앱으로 생성·목록·삭제·import/export와 `ssh-keygen`/`ssh-add` 통합을 제공한다 | GUI·agent/global 환경 설정 중심이며 P-384/P-521 identity file 제한과 Process/GUI-session 우회를 자체 코드에서 처리한다. README의 최소 OS 주장은 상충하므로 플랫폼 사실로 채택하지 않는다 | [README 기능](https://github.com/fyezool/ssh-apple-secure-enclave/blob/1586d30299219429ea630f98ff33457be6b79d75/README.md#L103-L115), [제약](https://github.com/fyezool/ssh-apple-secure-enclave/blob/1586d30299219429ea630f98ff33457be6b79d75/README.md#L208-L221), [서비스 코드](https://github.com/fyezool/ssh-apple-secure-enclave/blob/1586d30299219429ea630f98ff33457be6b79d75/SecureEnclaveSSH/Services/SCAuthService.swift#L130-L245) |
+| `whitworth-org/pinentry-darwin` | `p256-ne bio`를 만들고 Apple provider로 `ssh-add`에 넣는다 | pinentry 앱의 부가 SSH identity 기능이며 agent 중심이다. stable identity file·검증·삭제 관리 도구는 아니다 | [README](https://github.com/whitworth-org/pinentry-darwin/blob/2e52c88963be96404c80232407c5632fb635264f/README.md#L36-L46), [`ssh-add` 호출](https://github.com/whitworth-org/pinentry-darwin/blob/2e52c88963be96404c80232407c5632fb635264f/Sources/SSHIdentity/SSHAddClient.swift#L4-L11) |
+| `o-az/shussh` | demo CLI로 `sc_auth` 생성·목록과 global provider 설정을 시도한다 | 코드가 label/hash 출력 수준이고 identity file 선택·삭제·서명·remote 검증이 없다 | [identity 코드](https://github.com/o-az/shussh/blob/7fc7e187b62fcbd973d9a8dcd94db445fa0dc5db/bin/keys.ts#L22-L75), [provider 설정](https://github.com/o-az/shussh/blob/7fc7e187b62fcbd973d9a8dcd94db445fa0dc5db/bin/cli.ts#L315-L350) |
+| `lstoll/keychain` | Go에서 Keychain/CTK identity 생성·삭제·CSR을 다루는 일반 library다 | CTK 인접 구현이지만 OpenSSH provider, identity file, SSH 검증 도구는 아니다 | [CTK identity 코드](https://github.com/lstoll/keychain/blob/928e30adc4106c62d2edd144141f7bb997a9b1e5/ctk_identity.go#L15-L112) |
 
 공개 코드 조사 범위에서는 `se-sshctl`과 같이 identity lifecycle, collision-safe
-stable wrapper 설치, provider 신뢰 검사, agent를 차단한 local/remote 검증,
-remote authorization·recovery 확인을 묶은 동일한 CLI는 찾지 못했다. 이는
+stable identity file 설치, provider 신뢰 검사, agent를 차단한 local/remote 검증,
+SHA-256-selected 삭제와 원격 authorization·recovery 경계를 함께 제공하는 CLI는 찾지 못했다. 이는
 조사한 공개 저장소에 한정한 부재 관찰이지 전 세계 구현의 부재 증명은 아니다.
 
 ## HN에서 언급된 인접 프로젝트
@@ -288,7 +288,7 @@ remote authorization·recovery 확인을 묶은 동일한 CLI는 찾지 못했�
   [Keeta agent HN 설명](https://news.ycombinator.com/item?id=46028517),
   [Keeta agent 저장소](https://github.com/KeetaNetwork/agent))
 - 1Password·Bitwarden, YubiKey, Krypton과 WebAuthn toy도 대안으로 논의됐지만
-  Apple CTK resident wrapper를 직접 관리하는 구현은 아니다.
+  Apple CTK identity file을 직접 관리하는 구현은 아니다.
   ([1Password·Bitwarden 논의](https://news.ycombinator.com/item?id=46030683),
   [YubiKey 논의](https://news.ycombinator.com/item?id=46026399),
   [Krypton 운영 경험](https://news.ycombinator.com/item?id=46036352),
@@ -296,9 +296,9 @@ remote authorization·recovery 확인을 묶은 동일한 CLI는 찾지 못했�
 
 ## 전제와 남은 불확실성
 
-- `IdentityAgent`가 불필요하다는 결론은 `se-sshctl wrapper install`이 만든
-  resident-key wrapper와 `SecurityKeyProvider /usr/lib/ssh-keychain.dylib`를
-  사용한다는 전제다. wrapper/provider 설정까지 불필요하다는 뜻은 아니다.
+- `IdentityAgent`가 불필요하다는 결론은 `se-sshctl install`이 만든
+  resident identity file과 `SecurityKeyProvider /usr/lib/ssh-keychain.dylib`를
+  사용한다는 전제다. identity file과 provider 설정까지 불필요하다는 뜻은 아니다.
   ([설정 렌더러](https://github.com/ajchemist/se-sshctl/blob/27dde4f2f013de7f0268d36d5572c6f17efa0746/Sources/SSHCTLCore/OperationalCommands.swift#L187-L205))
 - 일반 연결에서 `IdentityAgent none`은 필수값이 아니다. 격리 검증에서는 다른
   agent를 확실히 배제하기 위해 사용한다. 일반 설정은 `IdentitiesOnly yes`로

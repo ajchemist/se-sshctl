@@ -28,7 +28,7 @@ public enum CLI {
         fileManager: FileManager = .default,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         lockDirectory: URL? = nil,
-        wrapperPassphraseReader: (() throws -> Data)? = nil
+        identityFilePassphraseReader: (() throws -> Data)? = nil
     ) throws -> String {
         if arguments.isEmpty || arguments == ["help"] || arguments == ["--help"] || arguments == ["-h"] {
             return rootHelp
@@ -80,50 +80,34 @@ public enum CLI {
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case ["identity", "delete"]:
             let options = try Options(
-                Array(arguments.dropFirst(2)), values: ["-h", "--confirm"], flags: ["--json"]
+                Array(arguments.dropFirst(2)), values: ["--ctk-sha256", "--confirm"], flags: ["--json"]
             )
-            let report = try CTKIdentityDeleter(
+            let report = try IdentityDeleter(
                 executor: executor,
                 lockDirectory: lockDirectory ?? defaultLockDirectory
             ).delete(
-                hash: try options.required("-h"),
+                ctkSHA256: try options.required("--ctk-sha256"),
                 confirmation: try options.required("--confirm")
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
-        case ["identity", "retire"]:
+        case let prefix where prefix.first == "install":
             let options = try Options(
-                Array(arguments.dropFirst(2)),
-                values: ["--ctk-sha256", "--confirm"],
-                flags: ["--remote-authorization-cleared", "--recovery-access-verified", "--json"]
-            )
-            let report = try IdentityRetirer(
-                executor: executor,
-                lockDirectory: lockDirectory ?? defaultLockDirectory
-            ).retire(
-                ctkSHA256: try options.required("--ctk-sha256"),
-                confirmation: try options.required("--confirm"),
-                remoteAuthorizationCleared: options.has("--remote-authorization-cleared"),
-                recoveryAccessVerified: options.has("--recovery-access-verified")
-            )
-            return options.has("--json") ? try JSONOutput.encode(report) : human(report)
-        case ["wrapper", "install"]:
-            let options = try Options(
-                Array(arguments.dropFirst(2)),
-                values: ["--ctk-sha256", "--destination"],
+                Array(arguments.dropFirst()),
+                values: ["--ctk-sha256", "--identity-file"],
                 flags: ["--json"]
             )
             let hash = try options.required("--ctk-sha256")
-            let destination = options.value("--destination")
+            let identityFile = options.value("--identity-file")
                 ?? homeDirectory.appendingPathComponent(
                     ".ssh/identities/id_\(String(hash.prefix(16)).lowercased())"
                 ).path
-            guard let wrapperPassphraseReader else {
-                throw CLIError.usage("wrapper install requires a controlling terminal for passphrase input")
+            guard let identityFilePassphraseReader else {
+                throw CLIError.usage("install requires a controlling terminal for passphrase input")
             }
-            let report = try WrapperInstaller(executor: executor, fileManager: fileManager).install(
+            let report = try IdentityFileInstaller(executor: executor, fileManager: fileManager).install(
                 ctkSHA256: hash,
-                destination: URL(fileURLWithPath: expand(destination, homeDirectory: homeDirectory)),
-                passphrase: try wrapperPassphraseReader()
+                identityFile: URL(fileURLWithPath: expand(identityFile, homeDirectory: homeDirectory)),
+                passphrase: try identityFilePassphraseReader()
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case ["config", "render"]:
@@ -140,23 +124,23 @@ public enum CLI {
         case ["verify", "local"]:
             let options = try Options(
                 Array(arguments.dropFirst(2)),
-                values: ["--ctk-sha256", "--wrapper"],
+                values: ["--ctk-sha256", "--identity-file"],
                 flags: ["--json"]
             )
             let report = try LocalVerifier(executor: executor, fileManager: fileManager).verify(
                 ctkSHA256: try options.required("--ctk-sha256"),
-                wrapper: URL(fileURLWithPath: expand(try options.required("--wrapper"), homeDirectory: homeDirectory))
+                identityFile: URL(fileURLWithPath: expand(try options.required("--identity-file"), homeDirectory: homeDirectory))
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case ["verify", "remote"]:
             let options = try Options(
                 Array(arguments.dropFirst(2)),
-                values: ["--ctk-sha256", "--wrapper", "--target"],
+                values: ["--ctk-sha256", "--identity-file", "--target"],
                 flags: ["--json"]
             )
             let report = try RemoteVerifier(executor: executor, fileManager: fileManager).verify(
                 ctkSHA256: try options.required("--ctk-sha256"),
-                wrapper: expand(try options.required("--wrapper"), homeDirectory: homeDirectory),
+                identityFile: expand(try options.required("--identity-file"), homeDirectory: homeDirectory),
                 target: try options.required("--target")
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
@@ -172,9 +156,7 @@ public enum CLI {
         case ["identity", "list"]: identityListHelp
         case ["identity", "create"]: identityCreateHelp
         case ["identity", "delete"]: identityDeleteHelp
-        case ["identity", "retire"]: identityRetireHelp
-        case ["wrapper"]: wrapperHelp
-        case ["wrapper", "install"]: wrapperInstallHelp
+        case ["install"]: installHelp
         case ["config"]: configHelp
         case ["config", "render"]: configRenderHelp
         case ["verify"]: verifyHelp
@@ -241,15 +223,11 @@ private func human(_ report: IdentityCreateReport) -> String {
     "Created CTK SHA-256/hex \(report.identity.ctkPublicKeyHash) (\(report.identity.keyType)/\(report.identity.protection)) \(report.identity.label)"
 }
 
-private func human(_ report: CTKIdentityDeleteReport) -> String {
-    "Deleted SHA-1/hex \(report.ctkPublicKeyHash)"
+private func human(_ report: IdentityDeleteReport) -> String {
+    "Deleted CTK SHA-256/hex \(report.ctkPublicKeyHash)"
 }
 
-private func human(_ report: IdentityRetireReport) -> String {
-    "Retired SHA-256/hex \(report.ctkPublicKeyHash)"
-}
-
-private func human(_ report: WrapperInstallReport) -> String {
+private func human(_ report: IdentityFileInstallReport) -> String {
     "Installed \(report.identityFile)\nCTK SHA-256/hex \(report.ctkPublicKeyHash)\nFingerprint \(report.sshFingerprint)\nPublic key \(report.publicKey)"
 }
 
@@ -261,41 +239,33 @@ private func human(_ report: VerificationReport) -> String {
 private let rootHelp = """
 se-sshctl manages Apple CryptoTokenKit/Secure Enclave SSH identities.
 
-LAYERS
-  Plumbing commands expose CTK/OpenSSH concepts and native values without deployment-specific policy.
-  Porcelain may compose plumbing for user-defined workflows without changing plumbing semantics.
-
-PLUMBING
+COMMANDS
   se-sshctl doctor [--json]
   se-sshctl identity list [-t sha1|sha256|ssh] [-e hex|b64] [--json]
   se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--json]
-  se-sshctl identity delete -h SHA1 --confirm SHA1 [--json]
-  se-sshctl wrapper install --ctk-sha256 SHA256 [--destination PATH] [--json]
+  se-sshctl identity delete --ctk-sha256 SHA256 --confirm SHA256 [--json]
+  se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--json]
   se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
-  se-sshctl verify local --ctk-sha256 SHA256 --wrapper PATH [--json]
-  se-sshctl verify remote --ctk-sha256 SHA256 --wrapper PATH --target HOST [--json]
+  se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
+  se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--json]
 
-PORCELAIN
-  se-sshctl identity retire --ctk-sha256 SHA256 --confirm SHA256 --remote-authorization-cleared --recovery-access-verified [--json]
-
-PLUMBING WORKFLOW
+WORKFLOW
   1. Check this Mac and Apple's provider:
        se-sshctl doctor
   2. Create an identity and copy its full CTK SHA-256 hash:
        se-sshctl identity create -l example-key -k p-256-ne -t bio
-  3. Install its wrapper (private handle 0400, public key 0444):
-       se-sshctl wrapper install --ctk-sha256 SHA256 --destination ~/.ssh/identities/example/id_ecdsa_sk_rk
+  3. Install its identity file (key handle 0400, public key 0444):
+       se-sshctl install --ctk-sha256 SHA256 --identity-file ~/.ssh/identities/example/id_ecdsa_sk_rk
   4. Prove local signing works:
-       se-sshctl verify local --ctk-sha256 SHA256 --wrapper ~/.ssh/identities/example/id_ecdsa_sk_rk
+       se-sshctl verify local --ctk-sha256 SHA256 --identity-file ~/.ssh/identities/example/id_ecdsa_sk_rk
   5. Render a config block, then install the .pub key on the server yourself:
        se-sshctl config render --identity-file ~/.ssh/identities/example/id_ecdsa_sk_rk --host-pattern example-*
   6. Prove the selected identity authenticates remotely:
-       se-sshctl verify remote --ctk-sha256 SHA256 --wrapper ~/.ssh/identities/example/id_ecdsa_sk_rk --target user@host.example
+       se-sshctl verify remote --ctk-sha256 SHA256 --identity-file ~/.ssh/identities/example/id_ecdsa_sk_rk --target user@host.example
 
 DELETION
-  Remove the public key from every server, verify recovery access, then run
-  'se-sshctl identity retire --help'. Raw 'identity delete' expects the native
-  sc_auth SHA-1 hash. Secure Enclave deletion is permanent.
+  Remove the public key from every server and verify recovery access before running
+  'se-sshctl identity delete --help'. Secure Enclave deletion is permanent.
 
 Run any command with --help for details. Mutating commands never select by label.
 """
@@ -312,15 +282,14 @@ OPTIONS
 
 private let identityHelp = """
 USAGE
-  se-sshctl identity list|create|delete|retire ...
+  se-sshctl identity list|create|delete ...
 
 SUBCOMMANDS
-  list    [plumbing] List CTK identities using sc_auth hash type and encoding values.
-  create  [plumbing] Create one identity using sc_auth parameter names and values.
-  delete  [plumbing] Delete one identity using the native sc_auth SHA-1 hash.
-  retire  [porcelain] Apply remote/recovery policy, then permanently delete one identity.
+  list    List CTK identities using sc_auth hash type and encoding values.
+  create  Create one identity using sc_auth parameter names and values.
+  delete  Permanently delete one identity selected by its CTK SHA-256 hash.
 
-Operational selectors use --ctk-sha256; raw delete uses sc_auth -h SHA-1. Labels never select.
+Mutating selectors use --ctk-sha256. Labels never select.
 Run 'se-sshctl identity <subcommand> --help' for every option.
 """
 
@@ -340,7 +309,7 @@ private let identityCreateHelp = """
 USAGE
   se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--json]
 
-Low-level wrapper for 'sc_auth create-ctk-identity'. Its parameter names and values are preserved.
+Invokes 'sc_auth create-ctk-identity'. Its parameter names and values are preserved.
 Only p-256-ne is accepted because the resulting non-exportable identity is compatible with
 Apple's OpenSSH security-key provider. -t none requires --allow-unattended-signing because
 any process in the user context may request signatures.
@@ -356,60 +325,34 @@ OPTIONS
 
 private let identityDeleteHelp = """
 USAGE
-  se-sshctl identity delete -h SHA1 --confirm SHA1 [--json]
+  se-sshctl identity delete --ctk-sha256 SHA256 --confirm SHA256 [--json]
 
-Low-level wrapper for 'sc_auth delete-ctk-identity -h hash'. Permanently deletes one CTK
-identity and verifies its SHA-1 hash is absent. Use 'identity list -t sha1 -e hex' to obtain
-the exact native hash. Prefer 'identity retire' for the operator workflow. There is no delete-all command.
-
-OPTIONS
-  -h SHA1         sc_auth 40-character hexadecimal SHA-1 public-key hash.
-  --confirm SHA1  Repeat the exact same hash to confirm permanent deletion.
-  --json          Emit the versioned machine-readable report instead of text.
-"""
-
-private let identityRetireHelp = """
-USAGE
-  se-sshctl identity retire --ctk-sha256 SHA256 --confirm SHA256 --remote-authorization-cleared --recovery-access-verified [--json]
-
-Porcelain retirement resolves the operational SHA-256 identity to sc_auth's SHA-1 deletion
-hash, permanently deletes it, and verifies absence. Remove remote authorization and verify a
-replacement or break-glass key before supplying both acknowledgements.
+Permanently deletes one CTK identity selected by its SHA-256 hash. The command resolves
+sc_auth's native SHA-1 deletion hash internally and verifies both identifiers are absent.
+Remove remote authorization and verify replacement access first. There is no delete-all command.
 
 OPTIONS
-  --ctk-sha256 SHA256               Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
-  --confirm SHA256                  Repeat the same full hash to confirm permanent deletion.
-  --remote-authorization-cleared    Assert its public key was removed from every remote authorization store.
-  --recovery-access-verified        Assert replacement or break-glass access was tested successfully.
-  --json                            Emit the versioned machine-readable report instead of text.
+  --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
+  --confirm SHA256     Repeat the exact same hash to confirm permanent deletion.
+  --json               Emit the versioned machine-readable report instead of text.
 """
 
-private let wrapperHelp = """
+private let installHelp = """
 USAGE
-  se-sshctl wrapper install ...
-
-SUBCOMMANDS
-  install  Download and install the selected resident-key wrapper and public key.
-
-Run 'se-sshctl wrapper install --help' for every option.
-"""
-
-private let wrapperInstallHelp = """
-USAGE
-  se-sshctl wrapper install --ctk-sha256 SHA256 [--destination PATH] [--json]
+  se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--json]
 
 Runs 'ssh-keygen -K -w /usr/lib/ssh-keychain.dylib' in isolated directories,
 selects by SSH fingerprint, and refuses overwrite. The trusted provider path is fixed, not user-configurable.
-The default destination is ~/.ssh/identities/id_<first-16-hash-characters>.
-The wrapper is a private key handle, not exported private key material. It is installed mode 0400;
+The default identity-file path is ~/.ssh/identities/id_<first-16-hash-characters>.
+The identity file contains a key handle, not exported Secure Enclave private-key material. It is installed mode 0400;
 its .pub file is installed mode 0444; newly created parent directories are mode 0700.
-Before download, the command reads a wrapper passphrase twice from the controlling terminal
+Before download, the command reads an identity-file passphrase twice from the controlling terminal
 with echo disabled, like ssh-keygen. Submit an empty passphrase twice for no passphrase.
 
 OPTIONS
   --ctk-sha256 SHA256 Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
-  --destination PATH  Install the wrapper at PATH and its public key at PATH.pub.
-                      Default: ~/.ssh/identities/id_<first-16-hash-characters>.
+  --identity-file PATH  Install the identity file at PATH and its public key at PATH.pub.
+                        Default: ~/.ssh/identities/id_<first-16-hash-characters>.
   --json              Emit the versioned machine-readable report instead of text.
 """
 
@@ -430,7 +373,7 @@ USAGE
 Renders an SSH config block to stdout. It does not modify ~/.ssh/config.
 
 OPTIONS
-  --identity-file PATH   Set IdentityFile to the installed Secure Enclave wrapper PATH.
+  --identity-file PATH   Set IdentityFile to the installed Secure Enclave identity file PATH.
   --host-pattern PATTERN Set the SSH Host pattern for the rendered block.
   --json                 Emit a versioned object containing the rendered config instead of raw text.
 """
@@ -448,26 +391,26 @@ Run 'se-sshctl verify <subcommand> --help' for every option.
 
 private let verifyLocalHelp = """
 USAGE
-  se-sshctl verify local --ctk-sha256 SHA256 --wrapper PATH [--json]
+  se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
 
 Signs a temporary challenge through Apple's provider and verifies the resulting SSH signature.
 
 OPTIONS
   --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
-  --wrapper PATH   Use the installed resident-key wrapper at PATH and verify its fingerprint.
-  --json           Emit the versioned machine-readable report instead of text.
+  --identity-file PATH  Use the installed identity file at PATH and verify its fingerprint.
+  --json                Emit the versioned machine-readable report instead of text.
 """
 
 private let verifyRemoteHelp = """
 USAGE
-  se-sshctl verify remote --ctk-sha256 SHA256 --wrapper PATH --target HOST [--json]
+  se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--json]
 
 Performs a public-key-only BatchMode SSH authentication and runs the fixed remote command 'true'.
 It does not install or revoke remote authorized_keys entries.
 
 OPTIONS
   --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
-  --wrapper PATH   Use only the installed resident-key wrapper at PATH.
-  --target HOST    Connect to HOST, normally user@hostname, using isolated SSH options.
-  --json           Emit the versioned machine-readable report instead of text.
+  --identity-file PATH  Use only the installed identity file at PATH.
+  --target HOST         Connect to HOST, normally user@hostname, using isolated SSH options.
+  --json                Emit the versioned machine-readable report instead of text.
 """

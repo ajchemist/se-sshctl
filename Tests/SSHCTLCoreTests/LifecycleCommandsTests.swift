@@ -57,60 +57,38 @@ import Testing
     #expect(executor.requests.isEmpty)
 }
 
-@Test func nativeDeletionPreservesScAuthSHA1HashOptionAndVerifiesAbsence() throws {
-    let hash = String(repeating: "B", count: 40)
-    let executor = FakeSubprocessExecutor(results: [
-        .success(lifecycleResult(stdout: identityFixture(includeIdentity: true, hashType: .sha1))),
-        .success(lifecycleResult()),
-        .success(lifecycleResult(stdout: identityFixture(includeIdentity: false, hashType: .sha1))),
-    ])
-    let lockDirectory = uniqueTemporaryDirectory()
-    defer { try? FileManager.default.removeItem(at: lockDirectory) }
-
-    let output = try CLI.run(
-        arguments: ["identity", "delete", "-h", hash, "--confirm", hash],
-        executor: executor,
-        lockDirectory: lockDirectory
-    )
-
-    #expect(output == "Deleted SHA-1/hex \(hash)")
-    #expect(executor.requests[1].arguments == ["delete-ctk-identity", "-h", hash])
-}
-
-@Test func retirementRequiresExactConfirmationAndVerifiesAbsence() throws {
+@Test func deletionResolvesSHA256ToNativeSHA1AndVerifiesAbsence() throws {
     let hash = String(repeating: "A", count: 64)
     let executor = FakeSubprocessExecutor(results: [
         .success(lifecycleResult(stdout: identityFixture(includeIdentity: true))),
         .success(lifecycleResult(stdout: identityFixture(includeIdentity: true, hashType: .sha1))),
         .success(lifecycleResult()),
+        .success(lifecycleResult(stdout: identityFixture(includeIdentity: false, hashType: .sha1))),
         .success(lifecycleResult(stdout: identityFixture(includeIdentity: false))),
     ])
     let lockDirectory = uniqueTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: lockDirectory) }
 
-    let report = try IdentityRetirer(executor: executor, lockDirectory: lockDirectory).retire(
-        ctkSHA256: hash,
-        confirmation: hash,
-        remoteAuthorizationCleared: true,
-        recoveryAccessVerified: true
+    let output = try CLI.run(
+        arguments: ["identity", "delete", "--ctk-sha256", hash, "--confirm", hash],
+        executor: executor,
+        lockDirectory: lockDirectory
     )
 
-    #expect(report.ctkPublicKeyHash == hash)
+    #expect(output == "Deleted CTK SHA-256/hex \(hash)")
     #expect(executor.requests[2].arguments == [
         "delete-ctk-identity", "-h", String(repeating: "B", count: 40),
     ])
 }
 
-@Test func retirementRefusesMissingRemoteAndRecoveryAcknowledgements() {
+@Test func deletionRequiresExactSHA256Confirmation() {
     let hash = String(repeating: "A", count: 64)
     let executor = FakeSubprocessExecutor(results: [])
 
-    #expect(throws: IdentityLifecycleError.retirementSafetyNotAcknowledged) {
-        try IdentityRetirer(executor: executor).retire(
+    #expect(throws: IdentityLifecycleError.confirmationMismatch) {
+        try IdentityDeleter(executor: executor).delete(
             ctkSHA256: hash,
-            confirmation: hash,
-            remoteAuthorizationCleared: false,
-            recoveryAccessVerified: true
+            confirmation: String(repeating: "B", count: 64)
         )
     }
     #expect(executor.requests.isEmpty)

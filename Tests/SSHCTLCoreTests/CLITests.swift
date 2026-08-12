@@ -29,11 +29,11 @@ import Testing
 
     #expect(output.contains("identity create"))
     #expect(output.contains("identity delete"))
-    #expect(output.contains("identity retire"))
-    #expect(output.contains("wrapper install"))
+    #expect(!output.contains("identity retire"))
+    #expect(output.contains("se-sshctl install"))
+    #expect(!output.contains("wrapper"))
     #expect(output.contains("verify remote"))
-    #expect(output.contains("PLUMBING WORKFLOW"))
-    #expect(output.contains("user-defined workflows"))
+    #expect(output.contains("WORKFLOW"))
     #expect(output.contains("~/.ssh/identities/example/id_ecdsa_sk_rk"))
     #expect(output.contains("0400"))
     #expect(output.contains("0444"))
@@ -46,19 +46,18 @@ import Testing
         (["doctor", "--help"], ["--json"]),
         (["identity", "list", "--help"], ["-t", "sha1|sha256|ssh", "-e", "hex|b64", "--json"]),
         (["identity", "create", "--help"], ["-l", "-k", "-t", "p-256-ne", "bio|none", "--allow-unattended-signing", "--json"]),
-        (["identity", "delete", "--help"], ["-h", "--confirm", "sha1", "--json"]),
-        (["identity", "retire", "--help"], ["--ctk-sha256", "--confirm", "--remote-authorization-cleared", "--recovery-access-verified", "--json"]),
-        (["wrapper", "install", "--help"], ["--ctk-sha256", "--destination", "--json"]),
+        (["identity", "delete", "--help"], ["--ctk-sha256", "--confirm", "SHA256", "--json"]),
+        (["install", "--help"], ["--ctk-sha256", "--identity-file", "--json"]),
         (["config", "render", "--help"], ["--identity-file", "--host-pattern", "--json"]),
-        (["verify", "local", "--help"], ["--ctk-sha256", "--wrapper", "--json"]),
-        (["verify", "remote", "--help"], ["--ctk-sha256", "--wrapper", "--target", "--json"]),
+        (["verify", "local", "--help"], ["--ctk-sha256", "--identity-file", "--json"]),
+        (["verify", "remote", "--help"], ["--ctk-sha256", "--identity-file", "--target", "--json"]),
     ]
 
     for (arguments, options) in cases {
         let output = try CLI.run(arguments: arguments, executor: executor)
         for option in options { #expect(output.contains(option)) }
     }
-    for group in ["identity", "wrapper", "config", "verify"] {
+    for group in ["identity", "config", "verify"] {
         #expect(try CLI.run(arguments: [group, "--help"], executor: executor).contains("SUBCOMMANDS"))
     }
     #expect(executor.requests.isEmpty)
@@ -71,7 +70,19 @@ import Testing
         try CLI.run(arguments: ["identity", "create"], executor: executor)
     }
     #expect(throws: CLIError.self) {
-        try CLI.run(arguments: ["identity", "delete", "-h"], executor: executor)
+        try CLI.run(arguments: ["identity", "delete", "--ctk-sha256"], executor: executor)
+    }
+    #expect(throws: CLIError.self) {
+        try CLI.run(arguments: ["identity", "retire"], executor: executor)
+    }
+    #expect(throws: CLIError.self) {
+        try CLI.run(arguments: ["wrapper", "install"], executor: executor)
+    }
+    #expect(throws: CLIError.self) {
+        try CLI.run(arguments: ["install", "--destination", "/tmp/key"], executor: executor)
+    }
+    #expect(throws: CLIError.self) {
+        try CLI.run(arguments: ["verify", "local", "--wrapper", "/tmp/key"], executor: executor)
     }
     #expect(executor.requests.isEmpty)
 }

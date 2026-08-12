@@ -2,28 +2,28 @@ import Foundation
 import Testing
 @testable import SSHCTLCore
 
-@Test func wrapperInstallMatchesFingerprintAndRefusesImplicitOverwrite() throws {
+@Test func identityFileInstallMatchesFingerprintAndRefusesImplicitOverwrite() throws {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     let destination = root.appendingPathComponent("identity")
     defer { try? FileManager.default.removeItem(at: root) }
     let executor = OperationalExecutor()
 
-    let report = try WrapperInstaller(executor: executor).install(
-        ctkSHA256: hash, destination: destination, passphrase: Data()
+    let report = try IdentityFileInstaller(executor: executor).install(
+        ctkSHA256: hash, identityFile: destination, passphrase: Data()
     )
 
     #expect(report.identityFile == destination.path)
     #expect(report.publicKey == "sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ==")
     #expect(FileManager.default.fileExists(atPath: destination.path))
     #expect(FileManager.default.fileExists(atPath: destination.path + ".pub"))
-    let wrapperMode = try #require(
+    let identityFileMode = try #require(
         FileManager.default.attributesOfItem(atPath: destination.path)[.posixPermissions] as? NSNumber
     )
     let publicKeyMode = try #require(
         FileManager.default.attributesOfItem(atPath: destination.path + ".pub")[.posixPermissions] as? NSNumber
     )
-    #expect(wrapperMode.intValue == 0o400)
+    #expect(identityFileMode.intValue == 0o400)
     #expect(publicKeyMode.intValue == 0o444)
     let download = executor.requests.first { $0.arguments.first == "-K" }!
     #expect(download.arguments == ["-K", "-w", "/usr/lib/ssh-keychain.dylib"])
@@ -33,38 +33,38 @@ import Testing
     #expect(download.environment["SE_SSHCTL_ASKPASS_MODE"] == "1")
     #expect(download.environment["SE_SSHCTL_ASKPASS_FIFO"] == nil)
     #expect(download.standardInput == taggedDownloadInput(pin: Data("0".utf8), passphrase: Data()))
-    #expect(throws: OperationalCommandError.destinationExists) {
-        try WrapperInstaller(executor: executor).install(
-            ctkSHA256: hash, destination: destination, passphrase: Data()
+    #expect(throws: OperationalCommandError.identityFileExists) {
+        try IdentityFileInstaller(executor: executor).install(
+            ctkSHA256: hash, identityFile: destination, passphrase: Data()
         )
     }
 }
 
-@Test func wrapperInstallRefusesAmbiguousCrossFormatIdentityMetadata() {
+@Test func identityFileInstallRefusesAmbiguousCrossFormatIdentityMetadata() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let executor = OperationalExecutor(duplicateMetadata: true)
 
     #expect(throws: OperationalCommandError.identityMetadataAmbiguous) {
-        try WrapperInstaller(executor: executor).install(
+        try IdentityFileInstaller(executor: executor).install(
             ctkSHA256: hash,
-            destination: root.appendingPathComponent("identity"),
+            identityFile: root.appendingPathComponent("identity"),
             passphrase: Data()
         )
     }
     #expect(!executor.requests.contains { $0.arguments.first == "-K" })
 }
 
-@Test func wrapperInstallSuppliesNonEmptyPassphraseTwice() throws {
+@Test func identityFileInstallSuppliesNonEmptyPassphraseTwice() throws {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let executor = OperationalExecutor()
 
-    _ = try WrapperInstaller(executor: executor).install(
+    _ = try IdentityFileInstaller(executor: executor).install(
         ctkSHA256: hash,
-        destination: root.appendingPathComponent("identity"),
+        identityFile: root.appendingPathComponent("identity"),
         passphrase: Data("test passphrase".utf8)
     )
 
@@ -76,15 +76,15 @@ import Testing
     #expect(!download.environment.values.contains("test passphrase"))
 }
 
-@Test func bioWrapperInstallSuppliesEmptyProviderPIN() throws {
+@Test func bioIdentityFileInstallSuppliesEmptyProviderPIN() throws {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let executor = OperationalExecutor(protection: "bio")
 
-    _ = try WrapperInstaller(executor: executor).install(
+    _ = try IdentityFileInstaller(executor: executor).install(
         ctkSHA256: hash,
-        destination: root.appendingPathComponent("identity"),
+        identityFile: root.appendingPathComponent("identity"),
         passphrase: Data()
     )
 
@@ -92,21 +92,21 @@ import Testing
     #expect(download.standardInput == taggedDownloadInput(pin: Data(), passphrase: Data()))
 }
 
-@Test func wrapperInstallReportsOpenSSHTimeout() {
+@Test func identityFileInstallReportsOpenSSHTimeout() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
 
     #expect(throws: OperationalCommandError.commandFailed("timed out")) {
-        try WrapperInstaller(executor: OperationalExecutor(downloadTimedOut: true)).install(
+        try IdentityFileInstaller(executor: OperationalExecutor(downloadTimedOut: true)).install(
             ctkSHA256: hash,
-            destination: root.appendingPathComponent("identity"),
+            identityFile: root.appendingPathComponent("identity"),
             passphrase: Data()
         )
     }
 }
 
-@Test func wrapperInstallRejectsAskPassProtocolFailureEvenWhenOpenSSHSucceeds() {
+@Test func identityFileInstallRejectsAskPassProtocolFailureEvenWhenOpenSSHSucceeds() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -114,15 +114,15 @@ import Testing
     #expect(throws: OperationalCommandError.commandFailed(
         "native askpass rejected an unexpected OpenSSH prompt"
     )) {
-        try WrapperInstaller(executor: OperationalExecutor(askPassFailed: true)).install(
+        try IdentityFileInstaller(executor: OperationalExecutor(askPassFailed: true)).install(
             ctkSHA256: hash,
-            destination: root.appendingPathComponent("identity"),
+            identityFile: root.appendingPathComponent("identity"),
             passphrase: Data("expected passphrase".utf8)
         )
     }
 }
 
-@Test func wrapperInstallRejectsMissingPassphrasePrompt() {
+@Test func identityFileInstallRejectsMissingPassphrasePrompt() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -130,23 +130,23 @@ import Testing
     #expect(throws: OperationalCommandError.commandFailed(
         "native askpass rejected an unexpected OpenSSH prompt"
     )) {
-        try WrapperInstaller(executor: OperationalExecutor(passphrasePromptCount: 1)).install(
+        try IdentityFileInstaller(executor: OperationalExecutor(passphrasePromptCount: 1)).install(
             ctkSHA256: hash,
-            destination: root.appendingPathComponent("identity"),
+            identityFile: root.appendingPathComponent("identity"),
             passphrase: Data("expected passphrase".utf8)
         )
     }
 }
 
-@Test func wrapperInstallRetriesOverwritePositionsUntilFingerprintMatches() throws {
+@Test func identityFileInstallRetriesOverwritePositionsUntilFingerprintMatches() throws {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let executor = OperationalExecutor(identityCount: 2, matchingDownloadAttempt: 2)
 
-    _ = try WrapperInstaller(executor: executor).install(
+    _ = try IdentityFileInstaller(executor: executor).install(
         ctkSHA256: hash,
-        destination: root.appendingPathComponent("identity"),
+        identityFile: root.appendingPathComponent("identity"),
         passphrase: Data()
     )
 
@@ -160,7 +160,7 @@ import Testing
     #expect(downloads[1].standardInput == firstIdentityInput)
 }
 
-@Test func failedWrapperInstallDoesNotDeleteACompetitorInstall() {
+@Test func failedIdentityFileInstallDoesNotDeleteACompetitorInstall() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     let destination = root.appendingPathComponent("identity")
@@ -168,8 +168,8 @@ import Testing
     let executor = OperationalExecutor(racingDestination: destination)
 
     #expect(throws: (any Error).self) {
-        try WrapperInstaller(executor: executor).install(
-            ctkSHA256: hash, destination: destination, passphrase: Data()
+        try IdentityFileInstaller(executor: executor).install(
+            ctkSHA256: hash, identityFile: destination, passphrase: Data()
         )
     }
     #expect(FileManager.default.fileExists(atPath: destination.path))
@@ -194,13 +194,13 @@ import Testing
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
-    let wrapper = root.appendingPathComponent("identity")
-    try Data("wrapper".utf8).write(to: wrapper)
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
     try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
-        .write(to: URL(fileURLWithPath: wrapper.path + ".pub"))
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
     let executor = OperationalExecutor()
 
-    let report = try LocalVerifier(executor: executor).verify(ctkSHA256: hash, wrapper: wrapper)
+    let report = try LocalVerifier(executor: executor).verify(ctkSHA256: hash, identityFile: identityFile)
 
     #expect(report.status == "passed")
     let sign = executor.requests.first { $0.arguments.prefix(2) == ["-Y", "sign"] }
@@ -214,15 +214,15 @@ import Testing
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
-    let wrapper = root.appendingPathComponent("identity")
-    try Data("wrapper".utf8).write(to: wrapper)
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
     try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
-        .write(to: URL(fileURLWithPath: wrapper.path + ".pub"))
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
     let executor = OperationalExecutor()
 
     let report = try RemoteVerifier(executor: executor).verify(
         ctkSHA256: hash,
-        wrapper: wrapper.path,
+        identityFile: identityFile.path,
         target: "deploy@example.test"
     )
 
@@ -296,7 +296,7 @@ private final class OperationalExecutor: SubprocessExecuting {
                 )
             }
             let directory = request.currentDirectoryURL!
-            try Data("wrapper".utf8).write(to: directory.appendingPathComponent("id_test"))
+            try Data("identityFile".utf8).write(to: directory.appendingPathComponent("id_test"))
             try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
                 .write(to: directory.appendingPathComponent("id_test.pub"))
             let askPassResult = askPassFailed
@@ -309,7 +309,7 @@ private final class OperationalExecutor: SubprocessExecuting {
         }
         if request.arguments.first == "-l" {
             if let racingDestination {
-                try Data("competitor wrapper".utf8).write(to: racingDestination)
+                try Data("competitor identityFile".utf8).write(to: racingDestination)
                 try Data("competitor public key".utf8)
                     .write(to: URL(fileURLWithPath: racingDestination.path + ".pub"))
             }

@@ -21,11 +21,11 @@ private enum ConsolePassphraseError: Error, LocalizedError {
     case unavailable
 
     var errorDescription: String? {
-        "unable to read wrapper passphrase from a controlling terminal"
+        "unable to read identity file passphrase from a controlling terminal"
     }
 }
 
-private func readWrapperPassphrase() throws -> Data {
+private func readIdentityFilePassphrase() throws -> Data {
     while true {
         let passphrase = try readPassphrase("Enter passphrase (empty for no passphrase): ")
         let confirmation = try readPassphrase("Enter same passphrase again: ")
@@ -53,7 +53,7 @@ do {
     let output = try CLI.run(
         arguments: arguments,
         executor: ProcessExecutor(),
-        wrapperPassphraseReader: readWrapperPassphrase
+        identityFilePassphraseReader: readIdentityFilePassphrase
     )
     FileHandle.standardOutput.write(Data((output + "\n").utf8))
 } catch {
