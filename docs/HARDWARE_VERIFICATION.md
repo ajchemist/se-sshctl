@@ -1,5 +1,24 @@
 # Hardware verification
 
+## Add a MacBook Air Touch ID run
+
+Run this repeatable wizard from the repository root on a physical MacBook Air
+with Touch ID enrolled:
+
+```sh
+./scripts/verify-bio.sh
+```
+
+The wizard builds the current source, creates one temporary `p-256-ne + bio`
+identity, installs an identity file, requires an observed Touch ID approval for
+local signing, optionally verifies localhost SSH authentication, restores
+`~/.ssh/authorized_keys` byte-for-byte, and deletes the test identity. Only
+after cleanup does it offer to append a non-secret Markdown record below. Review
+the resulting diff before committing it. It does not exercise locked, logged-out,
+pre-first-unlock, or launchd contexts.
+
+## Verified runs
+
 Verified on a physical Apple silicon Mac on 2026-08-11:
 
 ```text

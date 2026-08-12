@@ -4,6 +4,16 @@
 identities on macOS. It creates and manages CryptoTokenKit (CTK) identities
 that OpenSSH can use through Apple's security-key provider.
 
+## Why this exists
+
+Apple's native commands cover the single-identity happy path. `se-sshctl` adds
+deterministic identity selection and fail-closed lifecycle checks: it works
+around `ssh-keygen -K` filename collisions, matches the requested identity by
+SSH fingerprint, validates Apple's provider, verifies signing and isolated SSH
+authentication, and confirms deletion instead of trusting command exit status.
+It is safety-focused orchestration around Apple tools, not another SSH agent or
+cryptographic implementation.
+
 ## Install
 
 ```sh
@@ -12,10 +22,12 @@ brew install ajchemist/tap/se-sshctl
 
 ## Usage
 
-This flow creates a CTK identity with a non-exportable private key. The private
-key stays in the Secure Enclave. You cannot export or copy it. The commands
-install an OpenSSH identity file, authorize its public key on an SSH host, and
-verify authentication.
+This flow requests a CTK identity with a non-exportable `p-256-ne` private key.
+Apple's tools keep that private key in the Secure Enclave so it cannot be
+exported or copied; this provider path does not expose provenance attestation.
+The commands install an OpenSSH identity file and verify authentication; you
+authorize its public key on an SSH host with your existing access or
+provisioning system.
 
 ### 1. Check this Mac
 
@@ -137,6 +149,8 @@ OpenSSH server policy. These tests require a controlled physical Mac.
 
 See the [physical-Mac verification record](docs/HARDWARE_VERIFICATION.md) for
 the tested create, install, sign, authenticate, revoke, and delete flow.
+Run [`scripts/verify-bio.sh`](scripts/verify-bio.sh) on a MacBook Air with Touch
+ID to exercise the current source and append a reviewed `bio` run to that record.
 
 ## Development
 

@@ -2,8 +2,6 @@
 .swiftpm/
 .DS_Store
 .agents/skills/orca-cli/
-/scripts/verify-bio.sh
-
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
