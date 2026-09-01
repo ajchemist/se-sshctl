@@ -106,6 +106,27 @@ Measures whether a '-t none' Secure Enclave identity can sign and authenticate
 from an SSH session when no one is at the Mac. That is the situation '-t none'
 exists for, and it is the one nobody has verified.
 
+WHAT EACH RUN ACTUALLY DOES
+
+  It runs on the Mac that holds the identity — the SSH target, not the machine
+  you are typing on — and in each context it performs two real operations:
+
+    ssh-keygen -Y sign through /usr/lib/ssh-keychain.dylib, which asks the
+      Secure Enclave for a signature and verifies it against the public key;
+
+    a full public-key SSH authentication to USER@localhost using only the
+      installed identity file, with ssh-agent, ~/.ssh/config, host-based,
+      password, and keyboard-interactive authentication all disabled, so the
+      only way it can succeed is a fresh signature from the enclave.
+
+  localhost is the target on purpose: it removes the network and a remote
+  sshd policy as variables, leaving exactly the question being asked — can the
+  enclave sign when no GUI session is attached to this Mac?
+
+  What it does not cover: launchd or other sessionless daemon contexts, a
+  network SSH target with its own server policy, and the '-t bio' path, which
+  is scripts/verify-bio.sh.
+
 Run this over SSH, once per context, in this order:
 
   unlocked          a normal SSH session while the GUI session is unlocked
@@ -182,6 +203,9 @@ if [[ "$CONTEXT" == "report" ]]; then
     printf '\n## -t none remote-session verification — %s\n\n' "$(/bin/date -u '+%Y-%m-%d')"
     printf 'Measured from an SSH session on physical hardware:\n\n'
     printf '```text\n'
+    printf 'host:       %s\n' "${HOST_NAME:-unknown}"
+    printf 'model:      %s (%s)\n' "${MODEL_NAME:-unknown}" "${MODEL_IDENTIFIER:-unknown}"
+    printf 'chip:       %s\n' "${CHIP:-unknown}"
     printf 'macOS:      %s\n' "${MACOS_VERSION:-unknown}"
     printf 'OpenSSH:    %s\n' "${OPENSSH_VERSION:-unknown}"
     printf 'source:     %s\n' "${SOURCE_REVISION:-unknown}"
@@ -194,6 +218,12 @@ if [[ "$CONTEXT" == "report" ]]; then
       remote_var="REMOTE_${context//-/_}"
       printf '| %s | %s | %s |\n' "$context" "${!local_var:-not-run}" "${!remote_var:-not-run}"
     done
+    # shellcheck disable=SC2016  # the backticks are markdown, not a subshell
+    printf '\nEach row is one SSH session into this Mac. "local signing" is\n'
+    printf 'ssh-keygen -Y sign through the Apple provider; "localhost\n'
+    printf 'authentication" is a real public-key SSH authentication using only\n'
+    printf 'the Secure Enclave identity file, with the agent, user config, and\n'
+    printf 'every password method disabled.\n'
     # shellcheck disable=SC2016  # the backticks are markdown, not a subshell
     printf '\nA `not-run` row was never attempted and says nothing about that context.\n'
   } >> "$REPORT_TARGET"
@@ -240,6 +270,14 @@ DOCTOR_JSON="$STATE_DIR/doctor.json"
 [[ "$(/usr/bin/plutil -extract provider.appleAnchored raw -o - "$DOCTOR_JSON")" == "true" ]] || {
   warn "the SSH provider is not Apple-anchored"; exit 1;
 }
+# Recorded per host: this wizard is meant to be run on whichever Mac can be
+# locked, logged out, and rebooted, so a report that does not name its machine
+# is not evidence about anything.
+HARDWARE=$(/usr/sbin/system_profiler SPHardwareDataType -detailLevel mini)
+save_state MODEL_NAME "$(printf '%s\n' "$HARDWARE" | /usr/bin/awk -F': ' '/Model Name/{print $2; exit}')"
+save_state MODEL_IDENTIFIER "$(printf '%s\n' "$HARDWARE" | /usr/bin/awk -F': ' '/Model Identifier/{print $2; exit}')"
+save_state CHIP "$(printf '%s\n' "$HARDWARE" | /usr/bin/awk -F': ' '/Chip/{print $2; exit}')"
+save_state HOST_NAME "$(/usr/sbin/scutil --get LocalHostName 2>/dev/null || /bin/hostname -s)"
 save_state MACOS_VERSION "$(/usr/bin/plutil -extract platform.version raw -o - "$DOCTOR_JSON")"
 save_state OPENSSH_VERSION "$(/usr/bin/plutil -extract openSSH.version raw -o - "$DOCTOR_JSON")"
 save_state SOURCE_REVISION "$(cd "$REPO_ROOT" && /usr/bin/git rev-parse HEAD)"

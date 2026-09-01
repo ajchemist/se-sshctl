@@ -558,6 +558,11 @@ USAGE
 
 Lists identity metadata. Output may disclose labels and should be redacted before sharing.
 
+The Valid and Valid To columns describe the identity's X.509 certificate, not its usability.
+An expired certificate was measured on macOS 26.6.2 to leave provider-backed signing, SSH
+authentication, and identity-file download all working, so do not read Valid=NO as "this key
+no longer works" — and never as "this key is safe to delete". See docs/HARDWARE_VERIFICATION.md.
+
 OPTIONS
   -t sha1|sha256|ssh  sc_auth public-key hash type. Default: sha256.
   -e hex|b64          sc_auth hash encoding. Default: hex, or b64 with -t ssh.

@@ -290,8 +290,17 @@ observe to that record. Each creates a throwaway identity and deletes it again:
 - [`scripts/verify-none-remote.sh`](scripts/verify-none-remote.sh) — whether a
   `none` identity signs and authenticates from an SSH session with the console
   locked, logged out, and after a reboot before first unlock. Run it over SSH,
-  once per context; state survives the reboot. This is the situation `-t none`
-  exists for and the one nobody has measured.
+  once per context; state survives the reboot.
+
+  Each run performs two real operations on the Mac that holds the identity:
+  `ssh-keygen -Y sign` through Apple's provider, and a full public-key SSH
+  authentication to `USER@localhost` using only the installed identity file,
+  with ssh-agent, `~/.ssh/config`, host-based, password, and
+  keyboard-interactive authentication all disabled — so the only way it can
+  succeed is a fresh signature from the enclave. `localhost` is deliberate: it
+  removes the network and a remote sshd policy as variables, leaving exactly
+  the question being asked. It does not cover launchd or other sessionless
+  daemon contexts.
 - [`scripts/verify-cert-expiry.sh`](scripts/verify-cert-expiry.sh) — whether an
   expired X.509 certificate stops OpenSSH from using the Secure Enclave key
   behind it. It replaces the certificate through `sc_auth create-ctk-csr` and
@@ -299,8 +308,23 @@ observe to that record. Each creates a throwaway identity and deletes it again:
   measurements. Needs an OpenSSL 3 binary; macOS ships LibreSSL, which cannot
   backdate `notAfter`.
 
-None of these has been run yet. Their questions are open, and a "still works"
-answer is as useful as a break.
+### What has been measured so far
+
+- **Certificate expiry does not affect this path.** An expired X.509 certificate
+  — replaced through `sc_auth create-ctk-csr` and `import-ctk-certificate`, so
+  the non-exportable key is unchanged — leaves provider-backed signing, SSH
+  authentication, and a fresh `ssh-keygen -K` download all working, even though
+  `sc_auth` reports `certificateValid=false`. The replacement was signed by an
+  unrelated CA, so OpenSSH is not tolerating an expired certificate; it does not
+  consult the certificate here at all. `Valid=NO` is not a signal that a key
+  stopped working, and never a reason to delete it.
+- **`-t none` works from an SSH session with the console locked.** Both local
+  signing and a real public-key SSH authentication succeeded on a Mac Studio
+  (M1 Ultra, macOS 26.6.2) while it was locked. Logged-out and
+  reboot-before-first-unlock are still unmeasured.
+
+Full records, including what each run did not cover, are in
+[`docs/HARDWARE_VERIFICATION.md`](docs/HARDWARE_VERIFICATION.md).
 
 ## Development
 
