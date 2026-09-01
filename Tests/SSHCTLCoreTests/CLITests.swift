@@ -118,6 +118,7 @@ import Testing
     #expect(output.contains("se-sshctl install"))
     #expect(!output.contains("wrapper"))
     #expect(output.contains("verify remote"))
+    #expect(output.contains("manifest list"))
     #expect(output.contains("WORKFLOW"))
     #expect(output.contains("~/.ssh/identities/example/id_ecdsa_sk_rk"))
     #expect(output.contains("0400"))
@@ -131,7 +132,9 @@ import Testing
         (["doctor", "--help"], ["--json"]),
         (["identity", "list", "--help"], ["-t", "sha1|sha256|ssh", "-e", "hex|b64", "--json"]),
         (["identity", "create", "--help"], ["-l", "-k", "-t", "p-256-ne", "bio|none", "--allow-unattended-signing", "--json"]),
-        (["install", "--help"], ["--ctk-sha256", "--identity-file", "--json"]),
+        (["install", "--help"], ["--ctk-sha256", "--identity-file", "--no-passphrase", "--json"]),
+        (["manifest", "list", "--help"], ["--json"]),
+        (["manifest", "prune", "--help"], ["--json"]),
         (["config", "render", "--help"], ["--identity-file", "--host-pattern", "--json"]),
         (["verify", "local", "--help"], ["--ctk-sha256", "--identity-file", "--json"]),
         (["verify", "remote", "--help"], ["--ctk-sha256", "--identity-file", "--target", "--json"]),
@@ -141,7 +144,7 @@ import Testing
         let output = try CLI.run(arguments: arguments, executor: executor)
         for option in options { #expect(output.contains(option)) }
     }
-    for group in ["identity", "config", "verify"] {
+    for group in ["identity", "config", "verify", "manifest"] {
         #expect(try CLI.run(arguments: [group, "--help"], executor: executor).contains("SUBCOMMANDS"))
     }
     #expect(executor.requests.isEmpty)

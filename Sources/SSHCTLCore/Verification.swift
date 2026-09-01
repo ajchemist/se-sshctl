@@ -36,6 +36,10 @@ public struct VerificationReport: Encodable, Equatable, Sendable {
     public let ctkSHA256: String
     public let target: String?
     public let checks: VerificationChecks
+    /// The SSH fingerprint this identity advertises. Non-nil only once the
+    /// preflight matched it against the installed public key, which is what
+    /// makes the run worth recording at all.
+    public let sshFingerprint: String?
     public let detail: String?
     /// OpenSSH client verbose output from `verify remote`, on both pass and
     /// fail. Server authentication logs are not here: reading them needs
@@ -48,6 +52,7 @@ public struct VerificationReport: Encodable, Equatable, Sendable {
         ctkSHA256: String,
         target: String?,
         checks: VerificationChecks,
+        sshFingerprint: String? = nil,
         detail: String? = nil,
         clientLog: String? = nil
     ) {
@@ -56,6 +61,7 @@ public struct VerificationReport: Encodable, Equatable, Sendable {
         self.ctkSHA256 = ctkSHA256
         self.target = target
         self.checks = checks
+        self.sshFingerprint = sshFingerprint
         self.detail = detail
         self.clientLog = clientLog
     }
@@ -83,6 +89,7 @@ private func failure(
     ctkSHA256: String,
     target: String?,
     checks: VerificationChecks,
+    sshFingerprint: String? = nil,
     clientLog: String? = nil
 ) -> VerificationFailed {
     VerificationFailed(
@@ -92,6 +99,7 @@ private func failure(
             ctkSHA256: ctkSHA256,
             target: target,
             checks: checks,
+            sshFingerprint: sshFingerprint,
             detail: (error as? LocalizedError)?.errorDescription ?? String(describing: error),
             clientLog: clientLog
         ),
@@ -129,6 +137,7 @@ public struct LocalVerifier {
         passphrase: Data? = nil
     ) throws -> VerificationReport {
         var checks = VerificationChecks()
+        var sshFingerprint: String?
         do {
             let identityFile = identityFile.standardizedFileURL
             let preflight = try verificationPreflight(
@@ -138,6 +147,7 @@ public struct LocalVerifier {
                 identityFile: identityFile.path,
                 checks: &checks
             )
+            sshFingerprint = preflight.resolved.sshFingerprint
             do {
                 try sign(identityFile: identityFile, preflight: preflight, passphrase: passphrase)
                 checks.localSigning = .passed
@@ -150,11 +160,17 @@ public struct LocalVerifier {
                 kind: "local",
                 ctkSHA256: preflight.normalizedHash,
                 target: nil,
-                checks: checks
+                checks: checks,
+                sshFingerprint: sshFingerprint
             )
         } catch {
             throw failure(
-                error, kind: "local", ctkSHA256: hash.uppercased(), target: nil, checks: checks
+                error,
+                kind: "local",
+                ctkSHA256: hash.uppercased(),
+                target: nil,
+                checks: checks,
+                sshFingerprint: sshFingerprint
             )
         }
     }
@@ -227,6 +243,7 @@ public struct RemoteVerifier {
     ) throws -> VerificationReport {
         var checks = VerificationChecks()
         var clientLog: String?
+        var sshFingerprint: String?
         do {
             guard !target.isEmpty, !target.hasPrefix("-"),
                   !target.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains) else {
@@ -239,6 +256,7 @@ public struct RemoteVerifier {
                 identityFile: identityFile,
                 checks: &checks
             )
+            sshFingerprint = preflight.resolved.sshFingerprint
             do {
                 let unlock = try passphrase.map {
                     try askPassUnlock(protection: preflight.resolved.protection, passphrase: $0)
@@ -268,6 +286,7 @@ public struct RemoteVerifier {
                 ctkSHA256: preflight.normalizedHash,
                 target: target,
                 checks: checks,
+                sshFingerprint: sshFingerprint,
                 clientLog: clientLog
             )
         } catch {
@@ -277,6 +296,7 @@ public struct RemoteVerifier {
                 ctkSHA256: hash.uppercased(),
                 target: target,
                 checks: checks,
+                sshFingerprint: sshFingerprint,
                 clientLog: clientLog
             )
         }

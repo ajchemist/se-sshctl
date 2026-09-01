@@ -168,6 +168,37 @@ The CLI manages local CTK identities and verifies SSH access. It emits public-ke
 metadata for external tools, but it does not manage remote automation or
 authorization.
 
+## Verification records
+
+Every `verify` run is recorded, so a result outlives the command that produced
+it:
+
+```sh
+se-sshctl manifest list
+se-sshctl manifest prune     # drop records whose identity file or CTK identity is gone
+```
+
+Results accumulate per check. A `verify local` run updates provider load and
+local signing and leaves an earlier remote result alone, keeping its original
+timestamp, so `manifest list` shows what has been proven and how long ago:
+
+```text
+  provider load:         passed (2h ago)
+  local signing:         passed (2h ago)
+  remote authentication: passed (37d ago) → deploy@host.example
+```
+
+Nothing expires by itself. A check that passed really did pass, and only you can
+decide whether a 37-day-old result is still current — but you cannot decide that
+without seeing its age, which is why the age is never omitted. Records are
+written only after the fingerprint check matched.
+
+The store is a single file at
+`~/Library/Application Support/se-sshctl/manifest.json`, mode 0600. `prune` is
+the cleanup path when an identity file is removed directly or a CTK identity is
+deleted with `sc_auth`; it never touches identity files or CTK identities
+itself.
+
 ## Supported macOS
 
 macOS 26 (Tahoe) and later. That is where this project has physical evidence:

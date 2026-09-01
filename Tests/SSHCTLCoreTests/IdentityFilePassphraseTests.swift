@@ -86,6 +86,7 @@ import Testing
             "--target", "deploy@example.test",
         ],
         executor: executor,
+        manifestDirectory: root.appendingPathComponent("state", isDirectory: true),
         identityFileUnlockReader: { Data("test passphrase".utf8) }
     )
 
@@ -118,6 +119,7 @@ import Testing
             "--target", "deploy@example.test",
         ],
         executor: executor,
+        manifestDirectory: root.appendingPathComponent("state", isDirectory: true),
         identityFileUnlockReader: { prompted = true; return Data() }
     )
 
@@ -139,7 +141,8 @@ import Testing
                 "verify", "local", "--ctk-sha256", String(repeating: "A", count: 64),
                 "--identity-file", root.appendingPathComponent("identity").path,
             ],
-            executor: executor
+            executor: executor,
+            manifestDirectory: root.appendingPathComponent("state", isDirectory: true)
         )
     }
 }

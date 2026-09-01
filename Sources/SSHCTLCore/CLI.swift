@@ -28,14 +28,22 @@ public enum CLI {
         fileManager: FileManager = .default,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         lockDirectory: URL? = nil,
+        manifestDirectory: URL? = nil,
         identityFilePassphraseReader: (() throws -> Data)? = nil,
-        identityFileUnlockReader: (() throws -> Data)? = nil
+        identityFileUnlockReader: (() throws -> Data)? = nil,
+        now: @escaping () -> Date = Date.init
     ) throws -> String {
+        let manifestStore = VerificationManifestStore(
+            directory: manifestDirectory, fileManager: fileManager, now: now
+        )
         if arguments.isEmpty || arguments == ["help"] || arguments == ["--help"] || arguments == ["-h"] {
             return rootHelp
         }
         if arguments == ["identity", "--help"] || arguments == ["identity", "-h"] {
             return identityHelp
+        }
+        if arguments == ["manifest", "--help"] || arguments == ["manifest", "-h"] {
+            return manifestHelp
         }
         if arguments.last == "--help" {
             return try help(for: Array(arguments.dropLast()))
@@ -111,6 +119,22 @@ public enum CLI {
                 passphrase: passphrase
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
+        case ["manifest", "list"]:
+            let options = try Options(Array(arguments.dropFirst(2)), values: [], flags: ["--json"])
+            let manifest = try manifestStore.load()
+            return options.has("--json")
+                ? try JSONOutput.encode(manifest)
+                : human(manifest, now: now())
+        case ["manifest", "prune"]:
+            let options = try Options(Array(arguments.dropFirst(2)), values: [], flags: ["--json"])
+            let known = Set(
+                try IdentityLister(executor: executor).list().identities
+                    .map { $0.ctkPublicKeyHash.uppercased() }
+            )
+            let removed = try manifestStore.prune(knownIdentityHashes: known)
+            return options.has("--json")
+                ? try JSONOutput.encode(ManifestPruneReport(removed: removed))
+                : human(pruned: removed)
         case ["config", "render"]:
             let options = try Options(
                 Array(arguments.dropFirst(2)),
@@ -129,15 +153,17 @@ public enum CLI {
                 flags: ["--json"]
             )
             let identityFilePath = expand(try options.required("--identity-file"), homeDirectory: homeDirectory)
-            let report = try LocalVerifier(executor: executor, fileManager: fileManager).verify(
-                ctkSHA256: try options.required("--ctk-sha256"),
-                identityFile: URL(fileURLWithPath: identityFilePath),
-                passphrase: try unlockPassphrase(
-                    forIdentityFileAt: identityFilePath,
-                    fileManager: fileManager,
-                    reader: identityFileUnlockReader
+            let report = try recording(into: manifestStore, identityFile: identityFilePath) {
+                try LocalVerifier(executor: executor, fileManager: fileManager).verify(
+                    ctkSHA256: try options.required("--ctk-sha256"),
+                    identityFile: URL(fileURLWithPath: identityFilePath),
+                    passphrase: try unlockPassphrase(
+                        forIdentityFileAt: identityFilePath,
+                        fileManager: fileManager,
+                        reader: identityFileUnlockReader
+                    )
                 )
-            )
+            }
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case ["verify", "remote"]:
             let options = try Options(
@@ -146,16 +172,18 @@ public enum CLI {
                 flags: ["--json"]
             )
             let identityFilePath = expand(try options.required("--identity-file"), homeDirectory: homeDirectory)
-            let report = try RemoteVerifier(executor: executor, fileManager: fileManager).verify(
-                ctkSHA256: try options.required("--ctk-sha256"),
-                identityFile: identityFilePath,
-                target: try options.required("--target"),
-                passphrase: try unlockPassphrase(
-                    forIdentityFileAt: identityFilePath,
-                    fileManager: fileManager,
-                    reader: identityFileUnlockReader
+            let report = try recording(into: manifestStore, identityFile: identityFilePath) {
+                try RemoteVerifier(executor: executor, fileManager: fileManager).verify(
+                    ctkSHA256: try options.required("--ctk-sha256"),
+                    identityFile: identityFilePath,
+                    target: try options.required("--target"),
+                    passphrase: try unlockPassphrase(
+                        forIdentityFileAt: identityFilePath,
+                        fileManager: fileManager,
+                        reader: identityFileUnlockReader
+                    )
                 )
-            )
+            }
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         default:
             throw CLIError.usage("unknown command; run 'se-sshctl --help'")
@@ -172,6 +200,9 @@ public enum CLI {
         case ["identity"]: identityHelp
         case ["identity", "list"]: identityListHelp
         case ["identity", "create"]: identityCreateHelp
+        case ["manifest"]: manifestHelp
+        case ["manifest", "list"]: manifestListHelp
+        case ["manifest", "prune"]: manifestPruneHelp
         case ["install"]: installHelp
         case ["config"]: configHelp
         case ["config", "render"]: configRenderHelp
@@ -211,6 +242,35 @@ private struct Options {
     func required(_ name: String) throws -> String {
         guard let value = values[name], !value.isEmpty else { throw CLIError.usage("missing required option: \(name)") }
         return value
+    }
+}
+
+public struct ManifestPruneReport: Encodable, Equatable, Sendable {
+    public let schemaVersion = 1
+    public let status = "pruned"
+    public let removed: [ManifestEntry]
+}
+
+/// Runs a verification and records it either way.
+///
+/// A failed run is recorded too: that is the whole point of keeping failed
+/// distinct from not-run. A recording failure on the success path is reported
+/// rather than swallowed, because a verification whose result was not kept did
+/// not finish the job it was asked to do.
+private func recording(
+    into store: VerificationManifestStore,
+    identityFile: String,
+    _ verify: () throws -> VerificationReport
+) throws -> VerificationReport {
+    do {
+        let report = try verify()
+        try store.record(report, identityFile: identityFile)
+        return report
+    } catch let failure as VerificationFailed {
+        // Never let a bookkeeping problem replace the verification failure the
+        // operator actually needs to see.
+        try? store.record(failure.report, identityFile: identityFile)
+        throw failure
     }
 }
 
@@ -268,6 +328,45 @@ private func human(_ report: DoctorReport) -> String {
     return lines
 }
 
+private func human(_ manifest: VerificationManifest, now: Date) -> String {
+    guard !manifest.identities.isEmpty else {
+        return "No recorded verifications."
+    }
+    return manifest.identities.map { entry in
+        let target = entry.target.map { " → \($0)" } ?? ""
+        return """
+        \(entry.ctkSHA256)
+          identity file:         \(entry.identityFile)
+          SSH fingerprint:       \(entry.sshFingerprint)
+          provider load:         \(describe(entry.providerLoad, now: now))
+          local signing:         \(describe(entry.localSigning, now: now))
+          remote authentication: \(describe(entry.remoteAuthentication, now: now))\(target)
+        """
+    }.joined(separator: "\n\n")
+}
+
+private func human(pruned entries: [ManifestEntry]) -> String {
+    guard !entries.isEmpty else { return "Nothing to prune." }
+    return "Pruned \(entries.count) record(s) whose identity file or CTK identity is gone:\n"
+        + entries.map { "  \($0.ctkSHA256)  \($0.identityFile)" }.joined(separator: "\n")
+}
+
+/// An outcome is never shown without its age. A `passed` from months ago is a
+/// real result, but only the operator can decide whether it is still current,
+/// and it cannot decide that without knowing when it was measured.
+private func describe(_ check: ManifestCheck, now: Date) -> String {
+    guard let at = check.at else { return check.outcome.rawValue }
+    let seconds = Int(now.timeIntervalSince(at))
+    let age = switch seconds {
+    case ..<0: "in the future"
+    case ..<60: "just now"
+    case ..<3600: "\(seconds / 60)m ago"
+    case ..<86400: "\(seconds / 3600)h ago"
+    default: "\(seconds / 86400)d ago"
+    }
+    return "\(check.outcome.rawValue) (\(age))"
+}
+
 private func human(_ report: IdentityListReport) -> String {
     let heading = "CTK public-key hash: \(report.hashType.rawValue)/\(report.hashEncoding.rawValue)"
     guard !report.identities.isEmpty else { return heading + "\nNo CTK identities." }
@@ -314,6 +413,7 @@ COMMANDS
   se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
   se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
   se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--json]
+  se-sshctl manifest list|prune [--json]
 
 WORKFLOW
   1. Check this Mac and Apple's provider:
@@ -328,6 +428,8 @@ WORKFLOW
        se-sshctl config render --identity-file ~/.ssh/identities/example/id_ecdsa_sk_rk --host-pattern example-*
   6. Prove the selected identity authenticates remotely:
        se-sshctl verify remote --ctk-sha256 SHA256 --identity-file ~/.ssh/identities/example/id_ecdsa_sk_rk --target user@host.example
+  7. Every verification above is recorded. Review what has been proven, and when:
+       se-sshctl manifest list
 
 DELETION
   This tool does not delete CTK identities. Removal is a permanent, unrecoverable
@@ -420,6 +522,61 @@ OPTIONS
   --json              Emit the versioned machine-readable report instead of text.
 """
 
+private let manifestHelp = """
+USAGE
+  se-sshctl manifest list|prune [--json]
+
+Every verification is recorded, so an answer survives the run that produced it.
+Without a record, "has this identity been verified?" can only be answered by
+verifying again, and a check that was never run looks the same as one that passed
+months ago.
+
+Results accumulate per check: 'verify local' updates provider load and local
+signing and leaves an earlier remote result alone, with its original timestamp.
+Every outcome is shown with its age, and nothing expires on its own — a passed
+check really did pass, and only you can decide whether it is still current.
+
+The store is one JSON file at
+~/Library/Application Support/se-sshctl/manifest.json, mode 0600.
+
+SUBCOMMANDS
+  list   Show every recorded verification with the age of each result.
+  prune  Drop records whose identity file or CTK identity no longer exists.
+
+Run 'se-sshctl manifest <subcommand> --help' for every option.
+"""
+
+private let manifestListHelp = """
+USAGE
+  se-sshctl manifest list [--json]
+
+Prints every recorded verification: the CTK SHA-256 hash, identity file, SSH
+fingerprint, and each check's outcome with how long ago it was measured. A
+recorded remote pass also names the host it was against, because a pass against
+one host proves nothing about another.
+
+Records are written only after the fingerprint check matched, so an entry always
+refers to an identity this tool actually resolved.
+
+OPTIONS
+  --json  Emit the stored manifest as versioned JSON.
+"""
+
+private let manifestPruneHelp = """
+USAGE
+  se-sshctl manifest prune [--json]
+
+Removes records whose identity file is gone from disk or whose CTK identity is no
+longer in the inventory, and prints what it removed. Nothing else is deleted:
+prune never touches identity files, public keys, or CTK identities.
+
+This is the cleanup path for records orphaned by removing an identity file
+directly, or by deleting a CTK identity with 'sc_auth delete-ctk-identity'.
+
+OPTIONS
+  --json  Emit the removed records as versioned JSON.
+"""
+
 private let configHelp = """
 USAGE
   se-sshctl config render ...
@@ -480,6 +637,7 @@ over a pipe, never through arguments or the environment.
 private let verifyRemoteHelp = """
 USAGE
   se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--json]
+  se-sshctl manifest list|prune [--json]
 
 Performs a public-key-only BatchMode SSH authentication and runs the fixed remote command 'true'.
 It does not install or revoke remote authorized_keys entries.
