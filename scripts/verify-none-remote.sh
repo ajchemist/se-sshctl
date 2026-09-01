@@ -158,21 +158,6 @@ save_state() {
   /bin/chmod 600 "$STATE_FILE"
 }
 
-resolve_sha1() {
-  local json="$STATE_DIR/list-sha1.json" index=0 entry_label found=""
-  "$SSHCTL" identity list -t sha1 --json > "$json"
-  while entry_label=$(/usr/bin/plutil -extract "identities.$index.label" raw -o - "$json" 2>/dev/null); do
-    if [[ "$entry_label" == "$LABEL" ]]; then
-      # No warn here: this function's stdout is captured by its caller.
-      [[ -z "$found" ]] || return 2
-      found=$(/usr/bin/plutil -extract "identities.$index.ctkPublicKeyHash" raw -o - "$json")
-    fi
-    index=$(( index + 1 ))
-  done
-  [[ -n "$found" ]] || return 1
-  printf '%s' "$found"
-}
-
 on_exit() {
   local status=$?
   trap - EXIT
@@ -233,13 +218,16 @@ if [[ "$CONTEXT" == "report" ]]; then
   stage "Remove the test identity and restore authorization"
   warn "This permanently deletes only the test identity named $LABEL."
   confirm "Delete it and restore $AUTHORIZED_KEYS now?" || { warn "cleanup skipped"; exit 1; }
-  sha1=$(resolve_sha1) && resolve_status=0 || resolve_status=$?
-  case "$resolve_status" in
-    0) /usr/sbin/sc_auth delete-ctk-identity -h "$sha1" \
-         || warn "sc_auth deletion failed; delete it by hand" ;;
-    2) warn "label $LABEL matches more than one identity; refusing to guess which to delete" ;;
-    *) note "the test identity is already gone" ;;
-  esac
+  # Uses the tool's own deletion, which resolves the sc_auth SHA-1 locator,
+  # verifies absence afterwards, and clears the identity file and verification
+  # record. Deleting through raw sc_auth here would leave both behind.
+  if "$SSHCTL" identity list --json | /usr/bin/grep -qi -- "$CTK_SHA256"; then
+    "$SSHCTL" identity delete --ctk-sha256 "$CTK_SHA256" --confirm "$CTK_SHA256" \
+      || { warn "deletion failed; delete it by hand with sc_auth delete-ctk-identity"; exit 1; }
+  else
+    note "the test identity is already gone"
+    "$SSHCTL" manifest prune >/dev/null || true
+  fi
   if [[ -f "$AUTHORIZED_KEYS_BACKUP" ]]; then
     /bin/cp -fp "$AUTHORIZED_KEYS_BACKUP" "$AUTHORIZED_KEYS"
   elif [[ "${AUTHORIZED_KEYS_CREATED:-0}" == "1" ]]; then

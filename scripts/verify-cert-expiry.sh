@@ -347,7 +347,10 @@ stage "Write the result and clean up"
 say "Appended to $REPORT_TARGET."
 warn "The next action permanently deletes only the test identity named $LABEL."
 confirm "Delete it and restore $AUTHORIZED_KEYS now?" || { warn "cleanup skipped"; exit 1; }
-/usr/sbin/sc_auth delete-ctk-identity -h "$CTK_SHA1" || { warn "sc_auth deletion failed"; exit 1; }
+# The tool's own deletion, so the verification records this run created are
+# cleared with the key rather than left pointing at nothing.
+"$SSHCTL" identity delete --ctk-sha256 "$CTK_SHA256" --confirm "$CTK_SHA256" \
+  || { warn "deletion failed"; exit 1; }
 restore_authorization || { warn "failed to restore $AUTHORIZED_KEYS"; exit 1; }
 IDENTITY_CREATED=0
 CLEANED_UP=1

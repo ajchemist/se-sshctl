@@ -123,3 +123,32 @@ signal about SSH usability, and `se-sshctl` should not present it as one.
 Not covered: whether macOS itself expires or renews these certificates over
 time, and whether any other Apple subsystem that consumes CTK identities cares.
 This measured OpenSSH.
+
+## -t none remote-session verification — 2026-09-01
+
+Measured from an SSH session on physical hardware:
+
+```text
+host:       mac-studio-m1u
+model:      Mac Studio (Mac13,2)
+chip:       Apple M1 Ultra
+macOS:      26.6.2
+OpenSSH:    OpenSSH_10.3p1, LibreSSL 3.3.6
+source:     33cef63a2cc7dbef6683f2126975e0060fac08c7
+params:     -k p-256-ne -t none --allow-unattended-signing
+```
+
+| Console state | local signing | localhost authentication |
+| --- | --- | --- |
+| unlocked | passed | passed |
+| locked | passed | passed |
+| logged-out | not-run | not-run |
+| pre-first-unlock | not-run | not-run |
+
+Each row is one SSH session into this Mac. "local signing" is
+ssh-keygen -Y sign through the Apple provider; "localhost
+authentication" is a real public-key SSH authentication using only
+the Secure Enclave identity file, with the agent, user config, and
+every password method disabled.
+
+A `not-run` row was never attempted and says nothing about that context.
