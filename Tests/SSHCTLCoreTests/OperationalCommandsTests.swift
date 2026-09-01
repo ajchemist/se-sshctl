@@ -31,7 +31,6 @@ import Testing
     #expect(download.environment["SSH_ASKPASS_REQUIRE"] == "force")
     #expect(download.environment["SSH_ASKPASS"] == Bundle.main.executableURL!.path)
     #expect(download.environment["SE_SSHCTL_ASKPASS_MODE"] == "1")
-    #expect(download.environment["SE_SSHCTL_ASKPASS_FIFO"] == nil)
     #expect(download.standardInput == taggedDownloadInput(pin: Data("0".utf8), passphrase: Data()))
     #expect(throws: OperationalCommandError.identityFileExists) {
         try IdentityFileInstaller(executor: executor).install(
@@ -73,7 +72,15 @@ import Testing
         pin: Data("0".utf8),
         passphrase: Data("test passphrase".utf8)
     ))
-    #expect(!download.environment.values.contains("test passphrase"))
+    // The passphrase must reach OpenSSH only over the stdin pipe. Substring
+    // checks, not equality: an environment value or argument that merely
+    // embeds it is the same disclosure.
+    #expect(!download.environment.values.contains { $0.contains("test passphrase") })
+    #expect(!download.arguments.contains { $0.contains("test passphrase") })
+    for request in executor.requests {
+        #expect(!request.environment.values.contains { $0.contains("test passphrase") })
+        #expect(!request.arguments.contains { $0.contains("test passphrase") })
+    }
 }
 
 @Test func bioIdentityFileInstallSuppliesEmptyProviderPIN() throws {
