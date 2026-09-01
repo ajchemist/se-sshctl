@@ -71,6 +71,23 @@ import Testing
     #expect(try JSONOutput.encode(report) == #"{"hashEncoding":"hex","hashType":"sha256","identities":[],"schemaVersion":2}"#)
 }
 
+@Test func textKeyTypeAndProtectionKeepTheirNativeScAuthSpelling() throws {
+    // Regression: typing these fields made interpolation print the Swift case
+    // name, so `identity list` showed "p256NonExportable/none" while the JSON
+    // stayed correct. An operator copies that value back into `identity
+    // create`, where only the sc_auth spelling is accepted.
+    let executor = FakeSubprocessExecutor(results: [
+        .success(result(stdout: fixtureText("identities-multiple"))),
+    ])
+
+    let output = try CLI.run(arguments: ["identity", "list"], executor: executor)
+
+    #expect(output.contains("p-256-ne/none"))
+    #expect(!output.contains("p256NonExportable"))
+    #expect("\(CTKKeyType.p256NonExportable)" == "p-256-ne")
+    #expect("\(CTKProtection.none)" == "none")
+}
+
 @Test func jsonKeyTypeAndProtectionKeepTheirNativeScAuthSpelling() throws {
     // Typing these fields must not change the wire format: external tooling
     // reads the sc_auth values, not Swift case names.

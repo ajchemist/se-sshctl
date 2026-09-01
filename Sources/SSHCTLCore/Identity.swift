@@ -31,6 +31,19 @@ public enum CTKProtection: String, Codable, Sendable, CaseIterable {
     public var providerPIN: Data { self == .bio ? Data() : Data("0".utf8) }
 }
 
+/// Interpolating either enum must produce the sc_auth spelling, never the
+/// Swift case name. Human output is plumbing too: an operator copies
+/// `p-256-ne` out of `identity list` and back into `identity create`, and
+/// CONTEXT.md holds these to the native values. Conforming here fixes every
+/// interpolation site at once, including ones not written yet.
+extension CTKKeyType: CustomStringConvertible {
+    public var description: String { rawValue }
+}
+
+extension CTKProtection: CustomStringConvertible {
+    public var description: String { rawValue }
+}
+
 public struct CTKIdentity: Codable, Equatable, Sendable {
     public let keyType: CTKKeyType
     public let ctkPublicKeyHash: String
