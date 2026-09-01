@@ -133,11 +133,17 @@ se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH
 se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST
 ```
 
-There is no deletion command. Deferring destructive lifecycle commands was an
-original constraint of this handoff; a deletion command shipped against it and
-has since been withdrawn as a breaking change (Beads decision `se-sshctl-9jy`).
-If deletion is reintroduced, expose only the stable CTK SHA-256 selector and
-resolve the native `sc_auth` SHA-1 hash internally.
+Expose only the stable CTK SHA-256 selector for deletion; resolve the native
+`sc_auth` SHA-1 hash internally:
+
+```text
+se-sshctl identity delete --ctk-sha256 SHA256 [--confirm SHA256]
+```
+
+Deferring destructive commands was an original constraint of this handoff. It
+was withdrawn once it became clear that removing the command did not remove the
+operation — it moved the operation to raw `sc_auth`, with none of the selection,
+ambiguity, confirmation, or absence checks (Beads decision `se-sshctl-9jy`).
 
 Porcelain may later name these combinations, but plumbing preserves sc_auth values:
 
@@ -297,13 +303,11 @@ Do not promise remote attestation of Apple Secure Enclave provenance. No verifie
 
 ## Deletion safety
 
-Defer destructive lifecycle commands until creation, discovery, identity-file
-handling, and verification are proven on physical hardware. Do not add deletion
-in the same milestone. Do not implement `delete-all-ctk-identities` in the
-product at all.
+Do not implement `delete-all-ctk-identities` in the product. Single-identity
+deletion is a wrapper whose whole value is the checks it adds; a bulk delete has
+no such checks to add and destroys the ability to name what is being destroyed.
 
-Until deletion is reintroduced, operators use Apple's `sc_auth
-delete-ctk-identity` directly, in this order:
+Operators should use this order:
 
 ```text
 remove remote authorization
@@ -327,7 +331,8 @@ The package currently includes:
 4. fixture tests for `sc_auth` outputs, including labels with spaces and Unicode;
 5. provider signature/path/version checks;
 6. SSH configuration rendering without modifying user files;
-7. create, install, and local/remote verification commands.
+7. create, install, local/remote verification, and SHA-256-selected
+   single-identity deletion commands.
 
 These paths are unit-tested with fake system processes. The `-t none` path also has physical-Mac evidence for creation, multiple-identity identity file selection, local and unlocked-GUI SSH-session signing, localhost authentication, revocation, and recovery. The `-t bio` path and remaining locked/logged-out/reboot/launchd contexts are still unverified.
 

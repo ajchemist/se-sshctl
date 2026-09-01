@@ -79,3 +79,23 @@ The wizard recorded:
 - the temporary CTK identity was deleted and local authorization was restored.
 
 This run covers an unlocked GUI session. It does not prove behavior while the console is locked, logged out, before first unlock after reboot, or under launchd.
+
+## Certificate expiry measurement — 2026-09-01
+
+```text
+macOS:    26.6.2
+OpenSSH:  OpenSSH_10.3p1, LibreSSL 3.3.6
+source:   9eadfdbccffefe052fb0474ff362ff8b2d96fc22
+notAfter: 20260831060234Z (in the past)
+```
+
+| Certificate | sc_auth Valid | local signing | localhost authentication |
+| --- | --- | --- | --- |
+| as issued by sc_auth | YES | passed | passed |
+| backdated, re-imported | false | passed | passed |
+
+import-ctk-certificate: passed
+
+The certificate was replaced through create-ctk-csr and
+import-ctk-certificate, so the non-exportable private key is unchanged
+between the two rows.

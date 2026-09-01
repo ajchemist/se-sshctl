@@ -132,10 +132,18 @@ Code running as the user can request signatures without approval. See the
 Labels do not select identities for changes; mutating commands take the full CTK
 SHA-256 hash.
 
-This CLI does not delete CTK identities. Secure Enclave deletion is permanent and
-the local CLI cannot prove that remote authorization was removed or that recovery
-access works, so removal stays with Apple's own `sc_auth delete-ctk-identity`
-after you have verified both conditions yourself.
+`identity delete` without `--confirm` shows what would be destroyed — the SSH
+fingerprint, both hashes, the label, the parameters, and the identity files that
+would go with it — and stops:
+
+```sh
+se-sshctl identity delete --ctk-sha256 SHA256              # preview
+se-sshctl identity delete --ctk-sha256 SHA256 --confirm SHA256
+```
+
+Secure Enclave deletion is permanent. Remove the key from every server that
+trusts it and confirm replacement access first; this tool cannot check either
+condition for you.
 
 `install` reads the identity-file passphrase from the controlling terminal with
 echo disabled. It does not accept a passphrase through command arguments or the
@@ -167,6 +175,34 @@ and are not collected.
 The CLI manages local CTK identities and verifies SSH access. It emits public-key
 metadata for external tools, but it does not manage remote automation or
 authorization.
+
+## What each command actually runs
+
+Every command is a wrapper around a fixed Apple binary at a fixed absolute path.
+Nothing is resolved through `PATH`, and the provider path is not configurable.
+
+| Command | Plumbing | What the wrapper adds |
+| --- | --- | --- |
+| `doctor` | `sw_vers`, `uname -m`, `ssh -V`, `codesign --verify --strict` and `-dr -` on the provider | Reports path, signature validity, Apple anchor, and identifier as four separate signals; warns below the verified macOS floor |
+| `identity list` | `sc_auth list-ctk-identities -t TYPE -e ENCODING` | Column-boundary parsing that survives labels with spaces and Unicode; strict field validation; versioned JSON |
+| `identity create` | `sc_auth create-ctk-identity -l LABEL -k TYPE -t PROT` | Refuses key types Apple's SSH provider cannot use; requires `--allow-unattended-signing` for `-t none`; snapshots the inventory before and after and proves exactly one matching identity appeared; never auto-deletes on partial failure |
+| `identity delete` | `sc_auth delete-ctk-identity -h SHA1` | Selects by the stable SHA-256 hash and resolves the SHA-1 locator internally; refuses ambiguous metadata; shows the SSH fingerprint before approval; verifies absence in both hash formats; removes the dead identity file and verification record |
+| `install` | `ssh-keygen -K -w /usr/lib/ssh-keychain.dylib` | Runs in isolated directories and refuses overwrite; works around `-K` ignoring the provider filter by selecting on SSH fingerprint; answers OpenSSH prompts through a prompt-validating askpass that fails closed; installs 0400/0444 |
+| `verify local` | `ssh-keygen -Y sign` then `ssh-keygen -Y verify` | Fingerprint and provider preflight; signs a throwaway challenge and verifies the signature against the installed public key; tri-state report |
+| `verify remote` | `ssh -v` with every ambient identity source disabled | Proves the selected identity alone authenticated; captures the client log; tri-state report |
+| `config render` | none | Prints a config block; never writes `~/.ssh/config` |
+| `manifest list`, `manifest prune` | none | Local verification records only |
+
+`sc_auth` subcommands this tool deliberately does not wrap:
+
+- `delete-all-ctk-identities` — there is no bulk delete and there will not be one.
+- `export-ctk-identity`, `import-ctk-identities` — moving key material is the
+  opposite of what a non-exportable Secure Enclave identity is for.
+- `create-ctk-csr`, `import-ctk-certificate` — certificate lifecycle is not
+  managed here. `scripts/verify-cert-expiry.sh` uses them to measure whether
+  certificate validity affects authentication at all.
+- `pair`, `unpair`, `enable_for_login`, `filevault`, PIV and legacy smart-card
+  commands — a different feature area.
 
 ## Verification records
 

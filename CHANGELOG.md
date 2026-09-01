@@ -5,28 +5,35 @@
 This release breaks compatibility in several places. Every break is listed
 here with what replaces it.
 
-### Removed: `se-sshctl identity delete`
+### Changed: `se-sshctl identity delete`
 
-Deletion now requires Apple's own `sc_auth delete-ctk-identity`.
+The command survives, with different behaviour. It was removed mid-cycle and
+restored before release; nothing shipped without it, so the net change from
+v0.1.4 is the one described here.
 
-The originating specification deferred destructive lifecycle commands until
-creation, discovery, identity-file handling, and verification were proven on
-hardware, and said not to add deletion in the same milestone. The command
-shipped against that, and the prohibiting sentences were later deleted from
-`HANDOFF.md` rather than honoured. Deletion is the one irreversible operation
-here, and the ordering existed to keep an unproven tool from destroying a
-user's only credential.
+`--confirm` is now optional. Without it, the command resolves the identity,
+prints what would be destroyed — SSH fingerprint, CTK SHA-256, sc_auth SHA-1,
+label, parameters, and the identity files that would go with it — and stops.
+The specification asks for the fingerprint to be displayed and then approved,
+in that order; approving a hash pasted from elsewhere is not that.
 
-Migration:
+Deletion now also removes what depended on the key: the identity file and its
+`.pub`, which after deletion are handles to a key that no longer exists, and the
+verification record, which is a claim about an identity that no longer exists.
+A recorded file is deleted only when its `.pub` still carries this key's SSH
+fingerprint, so a path reused for another key is left alone and reported.
 
-```sh
-se-sshctl identity list -t sha1        # find the sc_auth deletion hash
-/usr/sbin/sc_auth delete-ctk-identity -h SHA1
-se-sshctl manifest prune               # clear the record and the dead identity file
-```
+The report is `schemaVersion` 3 and gains `ctkSHA1`, `sshFingerprint`,
+`removedFiles`, `removedRecords`, and `keptFiles`.
 
-Remove remote authorization and confirm recovery access before doing this.
-Neither `sc_auth` nor this tool can check either for you.
+Why it was removed and restored: the original specification deferred destructive
+commands until the rest was hardware-verified, and the command had shipped
+against that with the prohibition quietly deleted from `HANDOFF.md`. Reverting
+restored the specification but not the safety, because removing the command did
+not remove the operation — it moved the operation to raw
+`sc_auth delete-ctk-identity -h SHA1`, which has no SHA-256 selection, no
+ambiguity check, no fingerprint display, no confirmation, and no absence check.
+The wrapper was safer than the workflow that replaced it.
 
 Beads decision `se-sshctl-9jy`.
 
@@ -83,7 +90,10 @@ file and `.pub` left behind by a deleted CTK identity.
 - `verify local` and `verify remote` unlock a passphrase-protected identity
   file, which previously could be installed but never verified.
 - `se-sshctl manifest list` and `se-sshctl manifest prune`: verification
-  results now survive the run that produced them.
+  results now survive the run that produced them. `prune` also deletes the
+  identity file and `.pub` left behind by a deleted CTK identity.
+- README documents which Apple binary and arguments each command runs, and
+  which `sc_auth` subcommands this tool deliberately does not wrap.
 - `verify remote` runs the client verbosely and carries the log into the report.
 - `doctor` warns below macOS 26 without blocking.
 - `scripts/verify-none-remote.sh` and `scripts/verify-cert-expiry.sh` measure

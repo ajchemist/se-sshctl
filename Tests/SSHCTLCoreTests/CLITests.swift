@@ -113,7 +113,7 @@ import Testing
     let output = try CLI.run(arguments: ["--help"], executor: executor)
 
     #expect(output.contains("identity create"))
-    #expect(!output.contains("identity delete"))
+    #expect(output.contains("identity delete"))
     #expect(!output.contains("identity retire"))
     #expect(output.contains("se-sshctl install"))
     #expect(!output.contains("wrapper"))
@@ -133,6 +133,7 @@ import Testing
         (["identity", "list", "--help"], ["-t", "sha1|sha256|ssh", "-e", "hex|b64", "--json"]),
         (["identity", "create", "--help"], ["-l", "-k", "-t", "p-256-ne", "bio|none", "--allow-unattended-signing", "--json"]),
         (["install", "--help"], ["--ctk-sha256", "--identity-file", "--no-passphrase", "--json"]),
+        (["identity", "delete", "--help"], ["--ctk-sha256", "--confirm", "SHA256", "sc_auth delete-ctk-identity", "--json"]),
         (["manifest", "list", "--help"], ["--json"]),
         (["manifest", "prune", "--help"], ["--json"]),
         (["config", "render", "--help"], ["--identity-file", "--host-pattern", "--json"]),
@@ -155,9 +156,6 @@ import Testing
 
     #expect(throws: CLIError.self) {
         try CLI.run(arguments: ["identity", "create"], executor: executor)
-    }
-    #expect(throws: CLIError.self) {
-        try CLI.run(arguments: ["identity", "delete", "--ctk-sha256", String(repeating: "A", count: 64)], executor: executor)
     }
     #expect(throws: CLIError.self) {
         try CLI.run(arguments: ["identity", "retire"], executor: executor)

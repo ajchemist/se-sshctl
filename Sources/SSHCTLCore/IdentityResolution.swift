@@ -51,7 +51,12 @@ struct ResolvedIdentity {
     let ctkSHA1Hash: String
     let sshFingerprint: String
     let identityCount: Int
-    let protection: CTKProtection
+    /// The SHA-256 inventory row this resolution started from, so callers that
+    /// must show the operator what they are about to act on have the label and
+    /// parameters without a second listing.
+    let identity: CTKIdentity
+
+    var protection: CTKProtection { identity.protection }
 }
 
 struct IdentityResolver {
@@ -73,7 +78,7 @@ struct IdentityResolver {
             ctkSHA1Hash: sha1[0].ctkPublicKeyHash.uppercased(),
             sshFingerprint: ssh[0].ctkPublicKeyHash,
             identityCount: sha256.count,
-            protection: target.protection
+            identity: target
         )
     }
 }

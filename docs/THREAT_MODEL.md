@@ -48,7 +48,7 @@ Enclave provenance attestation is claimed.
 | Malicious provider replacement | Signature validation plus `identifier` and `anchor apple` evidence | Hosted CI does not prove the local provider actually signs with Secure Enclave |
 | Unauthorized unattended signing | Clear `-t none` semantics and mandatory explicit acknowledgement during creation | This is intrinsic to `none` protection |
 | Wrong-key identity file installation | Separate SHA-256/SHA-1/SSH identifiers; isolated overwrite-position downloads plus fingerprint matching; ambiguous metadata is rejected | Large or mixed-token inventories need more physical-Mac coverage |
-| Accidental identity deletion | The CLI has no deletion command; removal requires Apple's own `sc_auth delete-ctk-identity` | An operator running `sc_auth` directly gets none of this tool's selection or confirmation checks |
+| Accidental identity deletion | Full CTK SHA-256 selection with the SHA-1 locator resolved internally; ambiguous metadata rejected; SSH fingerprint displayed before approval; exact confirmation required; post-delete absence checked in both hash formats; no bulk delete | The CLI cannot prove remote authorization was removed or that recovery access works, and an operator who runs `sc_auth delete-ctk-identity` directly gets none of these checks |
 
 ## Supported platform
 

@@ -25,5 +25,5 @@ An OpenSSH private key file containing a key handle and public metadata for prov
 _Avoid_: Wrapper, private key
 
 **Identity deletion**:
-Permanent removal of one CTK identity through Apple's `sc_auth delete-ctk-identity`. This tool does not perform it; remote authorization and recovery readiness remain external operator responsibilities.
+Permanent removal of one CTK identity selected by its CTK SHA-256 public-key hash, together with the identity files and verification records that depended on it. The underlying operation is `sc_auth delete-ctk-identity -h SHA1`. Remote authorization and recovery readiness remain external operator responsibilities.
 _Avoid_: Retirement, remote revocation
