@@ -280,15 +280,52 @@ load_state
 
 # ── console state ─────────────────────────────────────────────────────────
 CURRENT_STAGE=console
-stage "Confirm the console is in the '$CONTEXT' state"
+stage "Check the console is in the '$CONTEXT' state"
+# Checked, not asked. Every row of the report is labelled by this state, so a
+# mis-answered prompt does not produce a missing result — it produces a wrong
+# one, which is worse. macOS reports both facts we need.
+CONSOLE_USER=$(/usr/bin/stat -f%Su /dev/console)
+if /usr/sbin/ioreg -n Root -d1 -k CGSSessionScreenIsLocked | /usr/bin/grep -q CGSSessionScreenIsLocked; then
+  SCREEN_LOCKED=1
+else
+  SCREEN_LOCKED=0
+fi
+note "console user: $CONSOLE_USER; screen locked: $([[ "$SCREEN_LOCKED" == 1 ]] && echo yes || echo no)"
+
+require_state() {
+  [[ "$1" == "$2" ]] && return 0
+  warn "this Mac is not in the '$CONTEXT' state: $3"
+  warn "put it in that state, reconnect over SSH, and run this again"
+  exit 1
+}
+
 case "$CONTEXT" in
-  unlocked)         say "The GUI session should be logged in and unlocked. This is the baseline." ;;
-  locked)           say "The console must be locked right now — screen saver or Ctrl-Cmd-Q." ;;
-  logged-out)       say "You must be logged out of the GUI entirely, at the login window." ;;
-  pre-first-unlock) say "The Mac must have rebooted and nobody may have logged in since." ;;
+  unlocked)
+    require_state "$([[ "$CONSOLE_USER" != "root" ]] && echo yes || echo no)" yes \
+      "nobody is logged in at the console"
+    require_state "$SCREEN_LOCKED" 0 "the screen is locked"
+    say "Logged in at the console and unlocked. This is the baseline."
+    ;;
+  locked)
+    require_state "$([[ "$CONSOLE_USER" != "root" ]] && echo yes || echo no)" yes \
+      "nobody is logged in at the console, so this is logged-out, not locked"
+    require_state "$SCREEN_LOCKED" 1 "the screen is not locked"
+    say "Logged in at the console with the screen locked."
+    ;;
+  logged-out)
+    require_state "$CONSOLE_USER" root "$CONSOLE_USER is still logged in at the console"
+    say "No console session. Logged out of the GUI."
+    ;;
+  pre-first-unlock)
+    require_state "$CONSOLE_USER" root "$CONSOLE_USER is logged in at the console"
+    # Indistinguishable from logged-out by console state alone: both leave the
+    # login window with no session. Whether a reboot happened with nobody
+    # logging in since is the operator'"'"'s to attest.
+    note "Booted $(/usr/bin/uptime | /usr/bin/sed -n '"'"'s/.*up \([^,]*\),.*/\1/p'"'"') ago."
+    confirm "Has this Mac rebooted since anyone last logged in at the console?" \
+      || { warn "reboot first, do not touch the login window, then run this"; exit 1; }
+    ;;
 esac
-note "Only you can see the console; the wizard cannot check this."
-confirm "Is the console in the '$CONTEXT' state?" || { warn "put it in that state and re-run"; exit 1; }
 
 # ── identity ──────────────────────────────────────────────────────────────
 CURRENT_STAGE=identity
