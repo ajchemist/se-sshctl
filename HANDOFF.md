@@ -60,7 +60,8 @@ Do not implement:
 
 Use `sc_auth` for CTK identity mutations. Swift should provide safe orchestration, state comparison, filesystem handling, machine-readable output, and verification.
 
-Keep external integration out of this CLI. It may print verified public-key metadata as human-readable text or schema-versioned JSON, but it must not deliver events, manage network credentials, persist delivery queues, or call automation services.
+Keep external integration out of this CLI (Beads decision `se-sshctl-smg`
+records why this reverses the original webhook requirement). It may print verified public-key metadata as human-readable text or schema-versioned JSON, but it must not deliver events, manage network credentials, persist delivery queues, or call automation services.
 
 This uses the same Apple system path as [`sekey.sh`](https://github.com/cavoirom/sekey-sh), but the product should not be a renamed shell script. `sekey.sh` is reference material for commands and failure cases.
 
@@ -132,12 +133,11 @@ se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH
 se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST
 ```
 
-Expose only the stable CTK SHA-256 selector for deletion; resolve the native
-`sc_auth` SHA-1 hash internally:
-
-```text
-se-sshctl identity delete --ctk-sha256 SHA256 --confirm SHA256
-```
+There is no deletion command. Deferring destructive lifecycle commands was an
+original constraint of this handoff; a deletion command shipped against it and
+has since been withdrawn as a breaking change (Beads decision `se-sshctl-9jy`).
+If deletion is reintroduced, expose only the stable CTK SHA-256 selector and
+resolve the native `sc_auth` SHA-1 hash internally.
 
 Porcelain may later name these combinations, but plumbing preserves sc_auth values:
 
@@ -297,9 +297,13 @@ Do not promise remote attestation of Apple Secure Enclave provenance. No verifie
 
 ## Deletion safety
 
-Do not implement `delete-all-ctk-identities` in the product.
+Defer destructive lifecycle commands until creation, discovery, identity-file
+handling, and verification are proven on physical hardware. Do not add deletion
+in the same milestone. Do not implement `delete-all-ctk-identities` in the
+product at all.
 
-Operators should use this order:
+Until deletion is reintroduced, operators use Apple's `sc_auth
+delete-ctk-identity` directly, in this order:
 
 ```text
 remove remote authorization
@@ -323,9 +327,9 @@ The package currently includes:
 4. fixture tests for `sc_auth` outputs, including labels with spaces and Unicode;
 5. provider signature/path/version checks;
 6. SSH configuration rendering without modifying user files;
-7. create, install, local/remote verification, and SHA-256-selected single-identity deletion commands.
+7. create, install, and local/remote verification commands.
 
-These paths are unit-tested with fake system processes. The `-t none` path also has physical-Mac evidence for creation, multiple-identity identity file selection, local and unlocked-GUI SSH-session signing, localhost authentication, revocation, recovery, and deletion. The `-t bio` path and remaining locked/logged-out/reboot/launchd contexts are still unverified.
+These paths are unit-tested with fake system processes. The `-t none` path also has physical-Mac evidence for creation, multiple-identity identity file selection, local and unlocked-GUI SSH-session signing, localhost authentication, revocation, and recovery. The `-t bio` path and remaining locked/logged-out/reboot/launchd contexts are still unverified.
 
 ## Required test classes
 
@@ -370,7 +374,10 @@ Until the user explicitly approves an integration run:
 - do not enumerate or print existing identity labels unnecessarily;
 - do not modify `~/.ssh/config`, shell profiles, Keychain, or SSH agent state;
 - do not connect to production infrastructure;
-- do not sign, notarize, install, publish, commit, or push releases.
+- do not sign, notarize, install, publish, commit, or push releases. This
+  repository publishes a GitHub Release per tag and dispatches nothing further;
+  an earlier Homebrew tap dispatch was withdrawn as a breaking change (Beads
+  decision `se-sshctl-9jy`).
 
 Unit tests and fixtures must not depend on existing user credentials.
 

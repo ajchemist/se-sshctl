@@ -235,8 +235,9 @@ on_exit() {
   if (( IDENTITY_CREATED )) && (( ! CLEANED_UP )); then
     printf '\n%s%s  Test identity still exists%s\n' "$BOLD" "$YELLOW" "$RESET"
     if [[ -n "$CTK_SHA256" ]]; then
-      printf '  Delete it with:\n  %q identity delete --ctk-sha256 %q --confirm %q\n' \
-        "$SSHCTL" "$CTK_SHA256" "$CTK_SHA256"
+      printf '  Find its sc_auth SHA-1 hash and delete it with:\n'
+      printf '  %q identity list -t sha1\n  /usr/sbin/sc_auth delete-ctk-identity -h SHA1\n' "$SSHCTL"
+      printf '  Its CTK SHA-256 hash is %s\n' "$CTK_SHA256"
     else
       printf '  Find its SHA-256 hash by label %q:\n  %q identity list\n' "$LABEL" "$SSHCTL"
     fi
@@ -368,17 +369,28 @@ fi
 
 CURRENT_STAGE=cleanup
 stage "Delete the test identity"
+say "se-sshctl does not delete identities; this uses Apple's sc_auth directly."
 warn "The next action permanently deletes only the test identity named $LABEL."
 confirm "Delete the test identity and temporary identity file now?" || {
   warn "Cleanup is required before a run can be recorded"; exit 1;
 }
-DELETE_JSON="$RUN_DIR/delete.json"
-"$SSHCTL" identity delete \
-  --ctk-sha256 "$CTK_SHA256" \
-  --confirm "$CTK_SHA256" \
-  --json > "$DELETE_JSON"
-[[ "$(/usr/bin/plutil -extract status raw -o - "$DELETE_JSON")" == "deleted" ]] || {
-  warn "identity deletion did not report success"; exit 1;
+LIST_SHA1_JSON="$RUN_DIR/list-sha1.json"
+"$SSHCTL" identity list -t sha1 --json > "$LIST_SHA1_JSON"
+CTK_SHA1=""
+index=0
+while entry_label=$(/usr/bin/plutil -extract "identities.$index.label" raw -o - "$LIST_SHA1_JSON" 2>/dev/null); do
+  if [[ "$entry_label" == "$LABEL" ]]; then
+    [[ -z "$CTK_SHA1" ]] || { warn "label $LABEL matches more than one identity; refusing to guess"; exit 1; }
+    CTK_SHA1=$(/usr/bin/plutil -extract "identities.$index.ctkPublicKeyHash" raw -o - "$LIST_SHA1_JSON")
+  fi
+  index=$(( index + 1 ))
+done
+[[ "$CTK_SHA1" =~ ^[0-9A-Fa-f]{40}$ ]] || { warn "could not resolve the sc_auth SHA-1 hash for $LABEL"; exit 1; }
+/usr/sbin/sc_auth delete-ctk-identity -h "$CTK_SHA1" || { warn "sc_auth deletion failed"; exit 1; }
+LIST_AFTER_JSON="$RUN_DIR/list-after.json"
+"$SSHCTL" identity list --json > "$LIST_AFTER_JSON"
+/usr/bin/grep -qi -- "$CTK_SHA256" "$LIST_AFTER_JSON" && {
+  warn "sc_auth reported success but the identity is still present"; exit 1;
 }
 IDENTITY_CREATED=0
 CLEANED_UP=1

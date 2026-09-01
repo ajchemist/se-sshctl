@@ -1,50 +1,35 @@
 # Release automation
 
-Stable `vMAJOR.MINOR.PATCH` tags are the only inputs to Homebrew distribution.
-The release workflow builds and tests the tag, creates its GitHub Release, then
-sends a `se-sshctl-release` repository dispatch to `ajchemist/homebrew-tap`.
-The tap independently downloads the immutable tag archive, computes its SHA-256,
-and opens a Formula update PR. Homebrew's `test-bot` builds and tests the source
-fallback and a macOS 26 bottle. After that exact PR commit passes, `pr-pull`
-publishes the bottle to GitHub Packages and commits its checksums to the Formula.
+Stable `vMAJOR.MINOR.PATCH` tags are the only release input. The release workflow
+builds and tests the tag and creates its GitHub Release. It publishes nothing
+else.
 
-## Why a GitHub App
+## Scope
 
-The repository-scoped `GITHUB_TOKEN` from `se-sshctl` cannot dispatch to
-`ajchemist/homebrew-tap`. The tap also uses an App token when opening its update
-PR so that the Formula test workflow runs for the resulting event. A private
-GitHub App avoids a long-lived personal access token and limits the installation
-to one repository with only the required permissions.
+The originating handoff specification excluded release publishing from this
+project: *"do not sign, notarize, install, publish, commit, or push releases."*
+An earlier revision dispatched a `se-sshctl-release` event to
+`ajchemist/homebrew-tap`, which drove a Formula update PR and a bottle publish.
+That automation has been removed as a breaking change; see Beads decision
+`se-sshctl-9jy`.
 
-## GitHub App configuration
+Distribution is now an explicit, operator-driven step outside this repository. A
+tap may still consume the published GitHub Release and its immutable tag archive,
+but nothing in this repository initiates it, and no cross-repository credential
+is configured here.
 
-`se-sshctl Homebrew Release` (App ID `4556534`) is installed only on
-`ajchemist/homebrew-tap` with:
+## Removed configuration
 
-- Contents: read and write;
-- Pull requests: read and write.
-
-Metadata read access is mandatory for GitHub Apps. Webhooks and event
-subscriptions are disabled.
-
-Both repositories contain:
+These are no longer read by any workflow and can be deleted from the repository
+once no other consumer depends on them:
 
 - repository variable `HOMEBREW_APP_ID`;
+- repository variable `HOMEBREW_LICENSE`;
 - repository secret `HOMEBREW_APP_PRIVATE_KEY`.
 
-The PEM is not stored in either repository or retained locally. To rotate it,
-generate a new App private key, update both secrets, verify token issuance, then
-delete the old key in the App settings.
-
-Set `HOMEBREW_LICENSE` in `ajchemist/se-sshctl` to the chosen SPDX identifier and
-commit the matching `LICENSE` file before the first release. The workflow refuses
-to publish without both values.
-
-The bottle publish workflow accepts only successful `Test se-sshctl Formula`
-runs for same-repository `automation/se-sshctl-*` branches and pins the reviewed
-head SHA when invoking `brew pr-pull`. The Formula keeps its source URL and build
-instructions as a fallback; normal `brew install ajchemist/tap/se-sshctl` uses a
-matching published bottle when one is available.
+Revoke the `se-sshctl Homebrew Release` GitHub App installation for this
+repository when removing them. `LICENSE` is still required and still verified by
+the workflow.
 
 ## Release
 
@@ -53,6 +38,5 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-If dispatch needs to be retried after the Release already exists, run the
-`Release` workflow manually with the existing tag. The workflow is idempotent and
-does not recreate an existing GitHub Release.
+To retry after a failure, run the `Release` workflow manually with the existing
+tag. The workflow is idempotent and does not recreate an existing GitHub Release.

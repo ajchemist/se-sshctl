@@ -9,16 +9,22 @@ that OpenSSH can use through Apple's security-key provider.
 Apple's native commands cover the single-identity happy path. `se-sshctl` adds
 deterministic identity selection and fail-closed lifecycle checks: it works
 around `ssh-keygen -K` filename collisions, matches the requested identity by
-SSH fingerprint, validates Apple's provider, verifies signing and isolated SSH
-authentication, and confirms deletion instead of trusting command exit status.
-It is safety-focused orchestration around Apple tools, not another SSH agent or
-cryptographic implementation.
+SSH fingerprint, validates Apple's provider, and verifies signing and isolated
+SSH authentication instead of trusting command exit status. It is safety-focused
+orchestration around Apple tools, not another SSH agent or cryptographic
+implementation.
 
 ## Install
 
 ```sh
-brew install ajchemist/tap/se-sshctl
+swift build --configuration release
 ```
+
+The binary is written to `.build/release/se-sshctl`; copy it onto your `PATH`.
+
+This repository publishes a GitHub Release per tag and nothing else. It no longer
+dispatches Homebrew tap updates, so `ajchemist/tap/se-sshctl` is not kept current
+from here. See [release automation](docs/RELEASING.md).
 
 ## Usage
 
@@ -123,11 +129,13 @@ The supported creation parameters are:
 Code running as the user can request signatures without approval. See the
 [threat model](docs/THREAT_MODEL.md).
 
-Labels do not select identities for changes. `identity delete` requires the full
-CTK SHA-256 hash twice, resolves `sc_auth`'s native SHA-1 deletion hash internally,
-and verifies both identifiers are absent afterward. Remove remote authorization
-and verify recovery access first; the local CLI cannot prove either condition.
-Secure Enclave deletion is permanent. There is no bulk-delete command.
+Labels do not select identities for changes; mutating commands take the full CTK
+SHA-256 hash.
+
+This CLI does not delete CTK identities. Secure Enclave deletion is permanent and
+the local CLI cannot prove that remote authorization was removed or that recovery
+access works, so removal stays with Apple's own `sc_auth delete-ctk-identity`
+after you have verified both conditions yourself.
 
 `install` reads the identity-file passphrase from the controlling terminal
 with echo disabled. It does not accept the passphrase through command arguments
@@ -148,7 +156,7 @@ key creation, provider-backed signing, biometric behavior, remote sessions, or
 OpenSSH server policy. These tests require a controlled physical Mac.
 
 See the [physical-Mac verification record](docs/HARDWARE_VERIFICATION.md) for
-the tested create, install, sign, authenticate, revoke, and delete flow.
+the tested create, install, sign, authenticate, and revoke flow.
 Run [`scripts/verify-bio.sh`](scripts/verify-bio.sh) on a MacBook Air with Touch
 ID to exercise the current source and append a reviewed `bio` run to that record.
 

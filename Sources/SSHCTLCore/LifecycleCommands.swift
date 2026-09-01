@@ -9,14 +9,6 @@ public struct IdentityCreateReport: Encodable, Equatable, Sendable {
     public let identity: CTKIdentity
 }
 
-public struct IdentityDeleteReport: Encodable, Equatable, Sendable {
-    public let schemaVersion = 2
-    public let status = "deleted"
-    public let hashType = CTKIdentityHashType.sha256
-    public let hashEncoding = CTKIdentityHashEncoding.hex
-    public let ctkPublicKeyHash: String
-}
-
 public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
     case invalidLabel
     case unsupportedKeyType
@@ -27,10 +19,6 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
     case commandFailed(String)
     case creationNotIdentified(Int)
     case createdIdentityMismatch
-    case identityNotFound
-    case identityMetadataAmbiguous
-    case confirmationMismatch
-    case deletionNotVerified
 
     public var errorDescription: String? {
         switch self {
@@ -52,14 +40,6 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
             "creation returned success but discovered \(count) new identities; no rollback was performed"
         case .createdIdentityMismatch:
             "new identity does not match the requested label, key type, and protection; no rollback was performed"
-        case .identityNotFound:
-            "identity was not found"
-        case .identityMetadataAmbiguous:
-            "identity metadata is duplicated; refusing to guess its deletion hash"
-        case .confirmationMismatch:
-            "--confirm must exactly match the selected hash"
-        case .deletionNotVerified:
-            "deletion returned success but the identity is still present"
         }
     }
 }
@@ -110,50 +90,6 @@ public struct IdentityCreator {
             throw IdentityLifecycleError.createdIdentityMismatch
         }
         return IdentityCreateReport(identity: created[0])
-    }
-}
-
-public struct IdentityDeleter {
-    private let executor: any SubprocessExecuting
-    private let lockDirectory: URL
-
-    public init(executor: any SubprocessExecuting, lockDirectory: URL? = nil) {
-        self.executor = executor
-        self.lockDirectory = lockDirectory ?? defaultLockDirectory
-    }
-
-    public func delete(ctkSHA256 hash: String, confirmation: String) throws -> IdentityDeleteReport {
-        let normalized = try normalizedCTKSHA256(hash)
-        guard confirmation == hash else { throw IdentityLifecycleError.confirmationMismatch }
-
-        let lock = try OperationLock(directory: lockDirectory)
-        defer { withExtendedLifetime(lock) {} }
-        let before = try IdentityLister(executor: executor).list().identities
-        guard let target = before.first(where: { $0.ctkPublicKeyHash.uppercased() == normalized }) else {
-            throw IdentityLifecycleError.identityNotFound
-        }
-        let deletionCandidates = try IdentityLister(
-            executor: executor, hashType: .sha1, hashEncoding: .hex
-        ).list().identities
-            .filter { sameIdentityMetadata($0, target) }
-        guard deletionCandidates.count == 1 else {
-            throw IdentityLifecycleError.identityMetadataAmbiguous
-        }
-        let sha1Hash = deletionCandidates[0].ctkPublicKeyHash.uppercased()
-        try requireSuccess(executor.run(SubprocessRequest(
-            executable: .scAuth,
-            arguments: ["delete-ctk-identity", "-h", sha1Hash],
-            timeout: 30
-        )))
-        let remainingSHA1 = try IdentityLister(
-            executor: executor, hashType: .sha1, hashEncoding: .hex
-        ).list().identities
-        let remainingSHA256 = try IdentityLister(executor: executor).list().identities
-        guard !remainingSHA1.contains(where: { $0.ctkPublicKeyHash.uppercased() == sha1Hash }),
-              !remainingSHA256.contains(where: { $0.ctkPublicKeyHash.uppercased() == normalized }) else {
-            throw IdentityLifecycleError.deletionNotVerified
-        }
-        return IdentityDeleteReport(ctkPublicKeyHash: normalized)
     }
 }
 

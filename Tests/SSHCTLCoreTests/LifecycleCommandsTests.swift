@@ -57,47 +57,7 @@ import Testing
     #expect(executor.requests.isEmpty)
 }
 
-@Test func deletionResolvesSHA256ToNativeSHA1AndVerifiesAbsence() throws {
-    let hash = String(repeating: "A", count: 64)
-    let executor = FakeSubprocessExecutor(results: [
-        .success(lifecycleResult(stdout: identityFixture(includeIdentity: true))),
-        .success(lifecycleResult(stdout: identityFixture(includeIdentity: true, hashType: .sha1))),
-        .success(lifecycleResult()),
-        .success(lifecycleResult(stdout: identityFixture(includeIdentity: false, hashType: .sha1))),
-        .success(lifecycleResult(stdout: identityFixture(includeIdentity: false))),
-    ])
-    let lockDirectory = uniqueTemporaryDirectory()
-    defer { try? FileManager.default.removeItem(at: lockDirectory) }
-
-    let output = try CLI.run(
-        arguments: ["identity", "delete", "--ctk-sha256", hash, "--confirm", hash],
-        executor: executor,
-        lockDirectory: lockDirectory
-    )
-
-    #expect(output == "Deleted CTK SHA-256/hex \(hash)")
-    #expect(executor.requests[2].arguments == [
-        "delete-ctk-identity", "-h", String(repeating: "B", count: 40),
-    ])
-}
-
-@Test func deletionRequiresExactSHA256Confirmation() {
-    let hash = String(repeating: "A", count: 64)
-    let executor = FakeSubprocessExecutor(results: [])
-
-    #expect(throws: IdentityLifecycleError.confirmationMismatch) {
-        try IdentityDeleter(executor: executor).delete(
-            ctkSHA256: hash,
-            confirmation: String(repeating: "B", count: 64)
-        )
-    }
-    #expect(executor.requests.isEmpty)
-}
-
-private func identityFixture(
-    includeIdentity: Bool,
-    hashType: CTKIdentityHashType = .sha256
-) -> String {
+private func identityFixture(includeIdentity: Bool) -> String {
     let text = try! String(
         contentsOf: Bundle.module.url(
             forResource: "identities-multiple",
@@ -107,14 +67,7 @@ private func identityFixture(
         encoding: .utf8
     )
     let lines = text.split(whereSeparator: \Character.isNewline)
-    var row = String(lines[1])
-    if hashType == .sha1 {
-        row = row.replacingOccurrences(
-            of: String(repeating: "A", count: 64),
-            with: String(repeating: "B", count: 40) + String(repeating: " ", count: 24)
-        )
-    }
-    return ([String(lines[0])] + (includeIdentity ? [row] : [])).joined(separator: "\n") + "\n"
+    return ([String(lines[0])] + (includeIdentity ? [String(lines[1])] : [])).joined(separator: "\n") + "\n"
 }
 
 private func lifecycleResult(stdout: String = "", stderr: String = "") -> SubprocessResult {

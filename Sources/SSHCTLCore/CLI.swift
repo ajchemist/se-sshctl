@@ -78,18 +78,6 @@ public enum CLI {
                 allowUnattendedSigning: options.has("--allow-unattended-signing")
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
-        case ["identity", "delete"]:
-            let options = try Options(
-                Array(arguments.dropFirst(2)), values: ["--ctk-sha256", "--confirm"], flags: ["--json"]
-            )
-            let report = try IdentityDeleter(
-                executor: executor,
-                lockDirectory: lockDirectory ?? defaultLockDirectory
-            ).delete(
-                ctkSHA256: try options.required("--ctk-sha256"),
-                confirmation: try options.required("--confirm")
-            )
-            return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case let prefix where prefix.first == "install":
             let options = try Options(
                 Array(arguments.dropFirst()),
@@ -155,7 +143,6 @@ public enum CLI {
         case ["identity"]: identityHelp
         case ["identity", "list"]: identityListHelp
         case ["identity", "create"]: identityCreateHelp
-        case ["identity", "delete"]: identityDeleteHelp
         case ["install"]: installHelp
         case ["config"]: configHelp
         case ["config", "render"]: configRenderHelp
@@ -223,10 +210,6 @@ private func human(_ report: IdentityCreateReport) -> String {
     "Created CTK SHA-256/hex \(report.identity.ctkPublicKeyHash) (\(report.identity.keyType)/\(report.identity.protection)) \(report.identity.label)"
 }
 
-private func human(_ report: IdentityDeleteReport) -> String {
-    "Deleted CTK SHA-256/hex \(report.ctkPublicKeyHash)"
-}
-
 private func human(_ report: IdentityFileInstallReport) -> String {
     "Installed \(report.identityFile)\nCTK SHA-256/hex \(report.ctkPublicKeyHash)\nFingerprint \(report.sshFingerprint)\nPublic key \(report.publicKey)"
 }
@@ -243,7 +226,6 @@ COMMANDS
   se-sshctl doctor [--json]
   se-sshctl identity list [-t sha1|sha256|ssh] [-e hex|b64] [--json]
   se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--json]
-  se-sshctl identity delete --ctk-sha256 SHA256 --confirm SHA256 [--json]
   se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--json]
   se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
   se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
@@ -264,8 +246,10 @@ WORKFLOW
        se-sshctl verify remote --ctk-sha256 SHA256 --identity-file ~/.ssh/identities/example/id_ecdsa_sk_rk --target user@host.example
 
 DELETION
-  Remove the public key from every server and verify recovery access before running
-  'se-sshctl identity delete --help'. Secure Enclave deletion is permanent.
+  This tool does not delete CTK identities. Removal is a permanent, unrecoverable
+  operation and stays with Apple's own 'sc_auth delete-ctk-identity', so that
+  revoking remote authorization and proving recovery access remain deliberate,
+  separate steps.
 
 Run any command with --help for details. Mutating commands never select by label.
 """
@@ -282,13 +266,13 @@ OPTIONS
 
 private let identityHelp = """
 USAGE
-  se-sshctl identity list|create|delete ...
+  se-sshctl identity list|create ...
 
 SUBCOMMANDS
   list    List CTK identities using sc_auth hash type and encoding values.
   create  Create one identity using sc_auth parameter names and values.
-  delete  Permanently delete one identity selected by its CTK SHA-256 hash.
 
+There is no delete subcommand; see 'se-sshctl --help' under DELETION.
 Mutating selectors use --ctk-sha256. Labels never select.
 Run 'se-sshctl identity <subcommand> --help' for every option.
 """
@@ -321,20 +305,6 @@ OPTIONS
   -t bio|none                 sc_auth private-key protection; required explicitly.
   --allow-unattended-signing  Required acknowledgement when -t none is selected.
   --json                      Emit the versioned machine-readable report instead of text.
-"""
-
-private let identityDeleteHelp = """
-USAGE
-  se-sshctl identity delete --ctk-sha256 SHA256 --confirm SHA256 [--json]
-
-Permanently deletes one CTK identity selected by its SHA-256 hash. The command resolves
-sc_auth's native SHA-1 deletion hash internally and verifies both identifiers are absent.
-Remove remote authorization and verify replacement access first. There is no delete-all command.
-
-OPTIONS
-  --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
-  --confirm SHA256     Repeat the exact same hash to confirm permanent deletion.
-  --json               Emit the versioned machine-readable report instead of text.
 """
 
 private let installHelp = """

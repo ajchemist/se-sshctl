@@ -48,12 +48,12 @@ Enclave provenance attestation is claimed.
 | Malicious provider replacement | Signature validation plus `identifier` and `anchor apple` evidence | Hosted CI does not prove the local provider actually signs with Secure Enclave |
 | Unauthorized unattended signing | Clear `-t none` semantics and mandatory explicit acknowledgement during creation | This is intrinsic to `none` protection |
 | Wrong-key identity file installation | Separate SHA-256/SHA-1/SSH identifiers; isolated overwrite-position downloads plus fingerprint matching; ambiguous metadata is rejected | Large or mixed-token inventories need more physical-Mac coverage |
-| Accidental identity deletion | Full CTK SHA-256 selection and exact confirmation; unambiguous internal SHA-1 resolution; post-delete absence checks in both hash formats; no bulk delete | The CLI cannot independently prove remote authorization removal or recovery readiness |
+| Accidental identity deletion | The CLI has no deletion command; removal requires Apple's own `sc_auth delete-ctk-identity` | An operator running `sc_auth` directly gets none of this tool's selection or confirmation checks |
 
 ## Unverified behaviors
 
 The `p-256-ne + none` canary covers creation, multiple identity-file selection,
 local signing, localhost authentication under the default server policy,
-revocation, recovery, deletion, and signing inside an SSH session while the GUI
-session is unlocked. The `-t bio` path and locked-console, logged-out,
+revocation, recovery, and signing inside an SSH session while the GUI session is
+unlocked. The `-t bio` path and locked-console, logged-out,
 reboot-before-first-unlock, and launchd contexts remain unverified.
