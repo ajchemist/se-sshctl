@@ -88,7 +88,8 @@ func verificationPreflight(
     executor: any SubprocessExecuting,
     fileManager: FileManager,
     ctkSHA256 hash: String,
-    identityFile path: String
+    identityFile path: String,
+    checks: inout VerificationChecks
 ) throws -> (normalizedHash: String, resolved: ResolvedIdentity, publicKeyPath: String) {
     let normalized = try normalizedCTKSHA256(hash)
     try validatePath(path)
@@ -96,7 +97,13 @@ func verificationPreflight(
     guard fileManager.fileExists(atPath: path), fileManager.fileExists(atPath: publicKeyPath) else {
         throw OperationalCommandError.identityFileNotFound
     }
-    try requireTrustedProvider(executor: executor, fileManager: fileManager)
+    do {
+        try requireTrustedProvider(executor: executor, fileManager: fileManager)
+        checks.providerLoad = .passed
+    } catch {
+        checks.providerLoad = .failed
+        throw error
+    }
     let resolved = try IdentityResolver(executor: executor).resolve(ctkSHA256: normalized)
     try requireMatchingFingerprint(
         executor: executor,

@@ -209,7 +209,12 @@ import Testing
 
     let report = try LocalVerifier(executor: executor).verify(ctkSHA256: hash, identityFile: identityFile)
 
-    #expect(report.status == "passed")
+    #expect(report.status == .passed)
+    #expect(report.checks.providerLoad == .passed)
+    #expect(report.checks.localSigning == .passed)
+    // The spec forbids turning "not tested" into success: verify local never
+    // touches a server, so this must say so rather than be omitted.
+    #expect(report.checks.remoteAuthentication == .notRun)
     let sign = executor.requests.first { $0.arguments.prefix(2) == ["-Y", "sign"] }
     let verify = executor.requests.first { $0.arguments.prefix(2) == ["-Y", "verify"] }
     #expect(sign != nil)
@@ -234,6 +239,10 @@ import Testing
     )
 
     #expect(report.target == "deploy@example.test")
+    #expect(report.status == .passed)
+    #expect(report.checks.providerLoad == .passed)
+    #expect(report.checks.remoteAuthentication == .passed)
+    #expect(report.checks.localSigning == .notRun)
     let ssh = executor.requests.first { $0.executable == .ssh }!
     #expect(ssh.arguments.contains("BatchMode=yes"))
     #expect(ssh.arguments.contains("IdentitiesOnly=yes"))
@@ -247,6 +256,58 @@ import Testing
     #expect(ssh.environment["KEYCHAIN_CERTIFICATES"] == String(repeating: "B", count: 40))
 }
 
+@Test func failedRemoteVerificationStillReportsWhichChecksRan() throws {
+    // The spec requires passed, failed, and not-run to stay distinct. A
+    // failure must not collapse into a bare error that loses the provider
+    // check that did pass and hides that local signing was never attempted.
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
+    try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
+    let executor = OperationalExecutor(remoteAuthenticationFails: true)
+
+    let failure = #expect(throws: VerificationFailed.self) {
+        try RemoteVerifier(executor: executor).verify(
+            ctkSHA256: hash, identityFile: identityFile.path, target: "deploy@example.test"
+        )
+    }
+
+    let report = try #require(failure?.report)
+    #expect(report.status == .failed)
+    #expect(report.checks.providerLoad == .passed)
+    #expect(report.checks.remoteAuthentication == .failed)
+    #expect(report.checks.localSigning == .notRun)
+    #expect(report.target == "deploy@example.test")
+    #expect(report.detail?.contains("Permission denied") == true)
+}
+
+@Test func untrustedProviderFailsThatCheckAndLeavesTheRestNotRun() throws {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
+    try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
+    let executor = OperationalExecutor(providerSignatureInvalid: true)
+
+    let failure = #expect(throws: VerificationFailed.self) {
+        try LocalVerifier(executor: executor).verify(ctkSHA256: hash, identityFile: identityFile)
+    }
+
+    let report = try #require(failure?.report)
+    #expect(report.status == .failed)
+    #expect(report.checks.providerLoad == .failed)
+    #expect(report.checks.localSigning == .notRun)
+    #expect(report.checks.remoteAuthentication == .notRun)
+    #expect(!executor.requests.contains { $0.arguments.prefix(2) == ["-Y", "sign"] })
+}
+
 private final class OperationalExecutor: SubprocessExecuting {
     private(set) var requests: [SubprocessRequest] = []
     private let duplicateMetadata: Bool
@@ -257,6 +318,8 @@ private final class OperationalExecutor: SubprocessExecuting {
     private let passphrasePromptCount: Int
     private let identityCount: Int
     private let matchingDownloadAttempt: Int
+    private let remoteAuthenticationFails: Bool
+    private let providerSignatureInvalid: Bool
     private var downloadAttempt = 0
 
     init(
@@ -267,8 +330,12 @@ private final class OperationalExecutor: SubprocessExecuting {
         askPassFailed: Bool = false,
         passphrasePromptCount: Int = 2,
         identityCount: Int = 1,
-        matchingDownloadAttempt: Int = 1
+        matchingDownloadAttempt: Int = 1,
+        remoteAuthenticationFails: Bool = false,
+        providerSignatureInvalid: Bool = false
     ) {
+        self.remoteAuthenticationFails = remoteAuthenticationFails
+        self.providerSignatureInvalid = providerSignatureInvalid
         self.duplicateMetadata = duplicateMetadata
         self.racingDestination = racingDestination
         self.protection = protection
@@ -282,9 +349,15 @@ private final class OperationalExecutor: SubprocessExecuting {
     func run(_ request: SubprocessRequest) throws -> SubprocessResult {
         requests.append(request)
         if request.executable == .codesign {
-            return request.arguments.first == "-dr"
-                ? operationalResult(stderr: "designated => identifier \"com.apple.ssh-keychain\" and anchor apple\n")
+            if request.arguments.first == "-dr" {
+                return operationalResult(stderr: "designated => identifier \"com.apple.ssh-keychain\" and anchor apple\n")
+            }
+            return providerSignatureInvalid
+                ? operationalResult(stderr: "code object is not signed at all\n", exitStatus: 1)
                 : operationalResult()
+        }
+        if request.executable == .ssh, remoteAuthenticationFails {
+            return operationalResult(stderr: "Permission denied (publickey).\n", exitStatus: 255)
         }
         if request.executable == .scAuth {
             let typeIndex = request.arguments.firstIndex(of: "-t")!
@@ -378,11 +451,11 @@ private func identityTable(
     return lines[0] + "\n" + row + "\n" + otherRow + "\n"
 }
 
-private func operationalResult(stdout: String = "", stderr: String = "") -> SubprocessResult {
+private func operationalResult(stdout: String = "", stderr: String = "", exitStatus: Int32 = 0) -> SubprocessResult {
     SubprocessResult(
         stdout: stdout,
         stderr: stderr,
-        exitStatus: 0,
+        exitStatus: exitStatus,
         terminationReason: .exit,
         timedOut: false
     )

@@ -137,6 +137,10 @@ public enum CLI {
         }
     }
 
+    /// Renders a verification manifest as text. Public so a failed run prints
+    /// the same manifest a passing one does, instead of only an error line.
+    public static func describe(_ report: VerificationReport) -> String { human(report) }
+
     private static func help(for command: [String]) throws -> String {
         switch command {
         case ["doctor"]: doctorHelp
@@ -223,7 +227,15 @@ private func human(_ report: IdentityFileInstallReport) -> String {
 
 private func human(_ report: VerificationReport) -> String {
     let target = report.target.map { ": \($0)" } ?? ""
-    return "\(report.kind) verification passed\(target)\nCTK SHA-256/hex \(report.ctkSHA256)"
+    var lines = [
+        "\(report.kind) verification \(report.status.rawValue)\(target)",
+        "CTK SHA-256/hex \(report.ctkSHA256)",
+        "  provider load:         \(report.checks.providerLoad.rawValue)",
+        "  local signing:         \(report.checks.localSigning.rawValue)",
+        "  remote authentication: \(report.checks.remoteAuthentication.rawValue)",
+    ]
+    if let detail = report.detail { lines.append("  detail: \(detail)") }
+    return lines.joined(separator: "\n")
 }
 
 private let rootHelp = """
@@ -363,6 +375,9 @@ SUBCOMMANDS
   local   Prove the selected Secure Enclave identity can sign locally.
   remote  Prove the selected identity alone can authenticate to one SSH target.
 
+Both report every check as passed, failed, or not-run. A check that did not run is
+never reported as a pass.
+
 Run 'se-sshctl verify <subcommand> --help' for every option.
 """
 
@@ -371,6 +386,11 @@ USAGE
   se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
 
 Signs a temporary challenge through Apple's provider and verifies the resulting SSH signature.
+
+Every run reports providerLoad, localSigning, and remoteAuthentication as passed, failed, or
+not-run. This command never contacts a server, so remoteAuthentication is always not-run;
+it is reported rather than omitted so an untested check is never read as a passing one.
+A failed run still prints the manifest and exits non-zero.
 
 OPTIONS
   --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
@@ -384,6 +404,10 @@ USAGE
 
 Performs a public-key-only BatchMode SSH authentication and runs the fixed remote command 'true'.
 It does not install or revoke remote authorized_keys entries.
+
+Every run reports providerLoad, localSigning, and remoteAuthentication as passed, failed, or
+not-run; localSigning is always not-run here. A failed run still prints the manifest and exits
+non-zero.
 
 OPTIONS
   --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.

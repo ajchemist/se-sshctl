@@ -56,6 +56,16 @@ do {
         identityFilePassphraseReader: readIdentityFilePassphrase
     )
     FileHandle.standardOutput.write(Data((output + "\n").utf8))
+} catch let failure as VerificationFailed {
+    // A verification that ran and did not pass still has a manifest worth
+    // emitting: it records which checks passed before the failure, and which
+    // were never attempted.
+    let output = arguments.contains("--json")
+        ? (try? JSONOutput.encode(failure.report)) ?? #"{"schemaVersion":3,"status":"failed"}"#
+        : "se-sshctl: " + (failure.errorDescription ?? "verification failed")
+            + "\n" + CLI.describe(failure.report)
+    FileHandle.standardError.write(Data((output + "\n").utf8))
+    exit(1)
 } catch {
     let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     let output = arguments.contains("--json")
