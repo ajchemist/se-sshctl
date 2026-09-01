@@ -379,10 +379,7 @@ Until the user explicitly approves an integration run:
 - do not enumerate or print existing identity labels unnecessarily;
 - do not modify `~/.ssh/config`, shell profiles, Keychain, or SSH agent state;
 - do not connect to production infrastructure;
-- do not sign, notarize, install, publish, commit, or push releases. This
-  repository publishes a GitHub Release per tag and dispatches nothing further;
-  an earlier Homebrew tap dispatch was withdrawn as a breaking change (Beads
-  decision `se-sshctl-9jy`).
+- do not sign, notarize, install, publish, commit, or push releases.
 
 Unit tests and fixtures must not depend on existing user credentials.
 

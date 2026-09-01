@@ -18,6 +18,7 @@ jobs:
     runs-on: macos-latest
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      HOMEBREW_LICENSE: ${{ vars.HOMEBREW_LICENSE }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,6 +29,7 @@ jobs:
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test -f LICENSE
+          test -n "$HOMEBREW_LICENSE"
           git rev-parse --verify "refs/tags/$TAG^{commit}"
           # A binary that reports a version it was not built for is worse than
           # one that reports none, so the tag and the constant must agree.
@@ -42,3 +44,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --generate-notes
+
+      - name: Create scoped tap token
+        id: tap-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: ajchemist
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Dispatch immutable release to Homebrew tap
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+        run: |
+          commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          gh api --method POST repos/ajchemist/homebrew-tap/dispatches \
+            -f event_type=se-sshctl-release \
+            -f "client_payload[repository]=$GITHUB_REPOSITORY" \
+            -f "client_payload[tag]=$TAG" \
+            -f "client_payload[commit]=$commit" \
+            -f "client_payload[license]=$HOMEBREW_LICENSE"

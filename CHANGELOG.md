@@ -45,19 +45,6 @@ The wrapper was safer than the workflow that replaced it.
 
 Beads decision `se-sshctl-9jy`.
 
-### Removed: Homebrew tap dispatch from the release workflow
-
-Tagged releases publish a GitHub Release and dispatch nothing further, so
-`ajchemist/tap/se-sshctl` is no longer updated from this repository. The
-specification excluded release publishing from this project.
-
-Migration: build from source with `swift build --configuration release`, or
-consume the published GitHub Release and its immutable tag archive from your
-own tap. `docs/RELEASING.md` lists the repository variables and secrets that
-are now unused and can be deleted.
-
-Beads decision `se-sshctl-9jy`.
-
 ### Changed: verification JSON is `schemaVersion` 3
 
 `status` was always the literal `"passed"` and the report existed only on the

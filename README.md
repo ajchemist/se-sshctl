@@ -17,14 +17,16 @@ implementation.
 ## Install
 
 ```sh
+brew install ajchemist/tap/se-sshctl
+```
+
+Or build from source:
+
+```sh
 swift build --configuration release
 ```
 
 The binary is written to `.build/release/se-sshctl`; copy it onto your `PATH`.
-
-This repository publishes a GitHub Release per tag and nothing else. It no longer
-dispatches Homebrew tap updates, so `ajchemist/tap/se-sshctl` is not kept current
-from here. See [release automation](docs/RELEASING.md).
 
 ## Usage
 
