@@ -85,8 +85,8 @@ This run covers an unlocked GUI session. It does not prove behavior while the co
 ```text
 macOS:    26.6.2
 OpenSSH:  OpenSSH_10.3p1, LibreSSL 3.3.6
-source:   9eadfdbccffefe052fb0474ff362ff8b2d96fc22
-notAfter: 20260831060234Z (in the past)
+source:   fb9b4e5fdaf03ee1dbadac5fe906f8576663998f
+notAfter: 20260831062608Z (in the past)
 ```
 
 | Certificate | sc_auth Valid | local signing | localhost authentication |
@@ -94,8 +94,32 @@ notAfter: 20260831060234Z (in the past)
 | as issued by sc_auth | YES | passed | passed |
 | backdated, re-imported | false | passed | passed |
 
-import-ctk-certificate: passed
+With the certificate expired:
+
+- import-ctk-certificate: passed
+- fresh identity-file download (ssh-keygen -K): passed
+- signing with that freshly downloaded file: passed
 
 The certificate was replaced through create-ctk-csr and
 import-ctk-certificate, so the non-exportable private key is unchanged
-between the two rows.
+between the two rows. That the identity file kept verifying after the swap is
+itself evidence of this: the fingerprint preflight would have refused a
+different key.
+
+Run twice, once without the download step and once with it. Both runs produced
+the same results for the rows they shared.
+
+**Conclusion: an expired X.509 certificate does not affect this path.** `sc_auth`
+sees the expiry and reports `certificateValid=false`, yet provider-backed
+signing, localhost authentication, and a fresh `ssh-keygen -K` identity-file
+download all still succeed. The replacement certificate was also signed by an
+unrelated throwaway CA, so OpenSSH is not merely tolerating an expired
+certificate; it does not consult the certificate at all here.
+
+This confirms the handoff's warning not to infer that an identity is safe to
+delete because its certificate appears expired. Certificate validity is not a
+signal about SSH usability, and `se-sshctl` should not present it as one.
+
+Not covered: whether macOS itself expires or renews these certificates over
+time, and whether any other Apple subsystem that consumes CTK identities cares.
+This measured OpenSSH.

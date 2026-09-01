@@ -81,7 +81,7 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 # STAGES — a single experiment. It answers one open question and cleans up.
 
-TOTAL_STAGES=6
+TOTAL_STAGES=7
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SSHCTL="$REPO_ROOT/.build/release/se-sshctl"
@@ -106,6 +106,8 @@ AFTER_LOCAL=not-run
 AFTER_REMOTE=not-run
 AFTER_VALID_COLUMN=unknown
 IMPORT_RESULT=not-run
+REINSTALL_RESULT=not-run
+REINSTALL_LOCAL=not-run
 
 restore_authorization() {
   (( AUTHORIZATION_CHANGED )) || return 0
@@ -290,6 +292,34 @@ else
   note "skipped: the expired certificate was never imported"
 fi
 
+# ── reinstall ─────────────────────────────────────────────────────────────
+CURRENT_STAGE=reinstall
+stage "Download a fresh identity file with the certificate expired"
+say "The measurement above used the identity file installed before the swap."
+say "That shows an existing file keeps working. It does not show whether"
+say "ssh-keygen -K will still hand out a new one once the certificate expired."
+if [[ "$IMPORT_RESULT" == "passed" ]]; then
+  REINSTALLED="$RUN_DIR/reinstalled"
+  if "$SSHCTL" install --ctk-sha256 "$CTK_SHA256" --identity-file "$REINSTALLED" \
+      --no-passphrase --json > "$RUN_DIR/reinstall.json" 2>"$RUN_DIR/reinstall.err"; then
+    REINSTALL_RESULT=passed
+    if "$SSHCTL" verify local --ctk-sha256 "$CTK_SHA256" --identity-file "$REINSTALLED" \
+        --json > "$RUN_DIR/reinstall-local.json" 2>"$RUN_DIR/reinstall-local.err"; then
+      REINSTALL_LOCAL=passed
+    else
+      REINSTALL_LOCAL=failed
+      note "$(/usr/bin/tail -n 2 "$RUN_DIR/reinstall-local.err")"
+    fi
+  else
+    REINSTALL_RESULT=failed
+    note "$(/usr/bin/tail -n 3 "$RUN_DIR/reinstall.err")"
+  fi
+  say "identity-file download:   $REINSTALL_RESULT"
+  say "signing with the new file: $REINSTALL_LOCAL"
+else
+  note "skipped: the expired certificate was never imported"
+fi
+
 # ── record ────────────────────────────────────────────────────────────────
 CURRENT_STAGE=record
 stage "Write the result and clean up"
@@ -306,7 +336,10 @@ stage "Write the result and clean up"
   printf '| as issued by sc_auth | YES | %s | %s |\n' "$BEFORE_LOCAL" "$BEFORE_REMOTE"
   printf '| backdated, re-imported | %s | %s | %s |\n' \
     "$AFTER_VALID_COLUMN" "$AFTER_LOCAL" "$AFTER_REMOTE"
-  printf '\nimport-ctk-certificate: %s\n' "$IMPORT_RESULT"
+  printf '\nWith the certificate expired:\n\n'
+  printf -- '- import-ctk-certificate: %s\n' "$IMPORT_RESULT"
+  printf -- '- fresh identity-file download (ssh-keygen -K): %s\n' "$REINSTALL_RESULT"
+  printf -- '- signing with that freshly downloaded file: %s\n' "$REINSTALL_LOCAL"
   printf '\nThe certificate was replaced through create-ctk-csr and\n'
   printf 'import-ctk-certificate, so the non-exportable private key is unchanged\n'
   printf 'between the two rows.\n'
