@@ -120,7 +120,14 @@ public struct LocalVerifier {
         self.fileManager = fileManager
     }
 
-    public func verify(ctkSHA256 hash: String, identityFile: URL) throws -> VerificationReport {
+    /// `passphrase` is nil when the identity file is not encrypted. A non-nil
+    /// value is delivered to OpenSSH through the native askpass responder over
+    /// stdin, never through argv or the environment.
+    public func verify(
+        ctkSHA256 hash: String,
+        identityFile: URL,
+        passphrase: Data? = nil
+    ) throws -> VerificationReport {
         var checks = VerificationChecks()
         do {
             let identityFile = identityFile.standardizedFileURL
@@ -132,7 +139,7 @@ public struct LocalVerifier {
                 checks: &checks
             )
             do {
-                try sign(identityFile: identityFile, preflight: preflight)
+                try sign(identityFile: identityFile, preflight: preflight, passphrase: passphrase)
                 checks.localSigning = .passed
             } catch {
                 checks.localSigning = .failed
@@ -157,7 +164,8 @@ public struct LocalVerifier {
     /// the Secure Enclave key actually produced a usable SSH signature.
     private func sign(
         identityFile: URL,
-        preflight: (normalizedHash: String, resolved: ResolvedIdentity, publicKeyPath: String)
+        preflight: (normalizedHash: String, resolved: ResolvedIdentity, publicKeyPath: String),
+        passphrase: Data?
     ) throws {
         let publicKey = try validatedPublicKey(at: URL(fileURLWithPath: preflight.publicKeyPath))
         let temporary = fileManager.temporaryDirectory
@@ -173,10 +181,12 @@ public struct LocalVerifier {
         let challengeData = Data("se-sshctl local signing verification\n".utf8)
         try challengeData.write(to: challenge, options: .atomic)
         let environment = providerEnvironment(ctkSHA1Hash: preflight.resolved.ctkSHA1Hash)
+        let unlock = try passphrase.map { try askPassUnlock(protection: preflight.resolved.protection, passphrase: $0) }
         try requireOperationalSuccess(executor.run(SubprocessRequest(
             executable: .sshKeygen,
             arguments: ["-Y", "sign", "-f", identityFile.path, "-n", "se-sshctl", challenge.path],
-            environment: environment,
+            environment: environment.merging(unlock?.environment ?? [:]) { _, new in new },
+            standardInput: unlock?.standardInput,
             timeout: 120
         )))
         let signature = URL(fileURLWithPath: challenge.path + ".sig")
@@ -208,7 +218,13 @@ public struct RemoteVerifier {
         self.fileManager = fileManager
     }
 
-    public func verify(ctkSHA256 hash: String, identityFile: String, target: String) throws -> VerificationReport {
+    /// `passphrase` is nil when the identity file is not encrypted.
+    public func verify(
+        ctkSHA256 hash: String,
+        identityFile: String,
+        target: String,
+        passphrase: Data? = nil
+    ) throws -> VerificationReport {
         var checks = VerificationChecks()
         var clientLog: String?
         do {
@@ -224,10 +240,17 @@ public struct RemoteVerifier {
                 checks: &checks
             )
             do {
+                let unlock = try passphrase.map {
+                    try askPassUnlock(protection: preflight.resolved.protection, passphrase: $0)
+                }
                 let result = try executor.run(SubprocessRequest(
                     executable: .ssh,
-                    arguments: isolatedSSHArguments(identityFile: identityFile, target: target),
-                    environment: providerEnvironment(ctkSHA1Hash: preflight.resolved.ctkSHA1Hash),
+                    arguments: isolatedSSHArguments(
+                        identityFile: identityFile, target: target, unlocking: unlock != nil
+                    ),
+                    environment: providerEnvironment(ctkSHA1Hash: preflight.resolved.ctkSHA1Hash)
+                        .merging(unlock?.environment ?? [:]) { _, new in new },
+                    standardInput: unlock?.standardInput,
                     timeout: 30
                 ))
                 // Captured before the success check: a failed authentication is
@@ -263,14 +286,21 @@ public struct RemoteVerifier {
 /// Every ambient source of SSH identity and authentication is disabled, so a
 /// pass proves the selected identity file alone authenticated: no agent, no
 /// user config, no multiplexed connection, no password fallback.
-private func isolatedSSHArguments(identityFile: String, target: String) -> [String] {
+///
+/// `unlocking` drops BatchMode, which OpenSSH also uses to suppress the key
+/// passphrase prompt. Nothing else is relaxed: password and keyboard-interactive
+/// authentication stay off, the askpass responder answers only a passphrase
+/// prompt and fails closed on anything else, and the 30s timeout still kills
+/// the process tree. Without this an encrypted identity file could never be
+/// verified at all.
+private func isolatedSSHArguments(identityFile: String, target: String, unlocking: Bool) -> [String] {
     [
         // -v records the authentication method progression, which is the only
         // client-side evidence of why a public-key attempt was refused.
         "-v",
         "-F", "none",
         "-S", "none",
-        "-o", "BatchMode=yes",
+    ] + (unlocking ? [] : ["-o", "BatchMode=yes"]) + [
         "-o", "ControlMaster=no",
         "-o", "ControlPath=none",
         "-o", "IdentitiesOnly=yes",
@@ -286,4 +316,35 @@ private func isolatedSSHArguments(identityFile: String, target: String) -> [Stri
         "-o", "IdentityFile=\(identityFile)",
         "--", target, "true",
     ]
+}
+
+/// Builds the environment and stdin that let OpenSSH unlock an encrypted
+/// identity file through the native askpass responder.
+///
+/// The passphrase travels on an anonymous stdin pipe and nowhere else: not in
+/// argv, not in an environment value, not in a file. The responder classifies
+/// each prompt and refuses any it does not recognise, so an unexpected prompt
+/// fails the run instead of receiving the secret. A provider PIN reply leads,
+/// because the responder tolerates and skips it when OpenSSH asks for the
+/// passphrase first.
+private func askPassUnlock(
+    protection: CTKProtection,
+    passphrase: Data
+) throws -> (environment: [String: String], standardInput: Data) {
+    guard !passphrase.contains(0), !passphrase.contains(10), !passphrase.contains(13) else {
+        throw OperationalCommandError.invalidPassphrase
+    }
+    guard let askPass = Bundle.main.executableURL, askPass.path.hasPrefix("/") else {
+        throw OperationalCommandError.commandFailed("unable to resolve native askpass executable")
+    }
+    var input = AskPassResponder.pinReply(protection.providerPIN)
+    input.append(AskPassResponder.passphraseReply(passphrase))
+    return (
+        [
+            "SSH_ASKPASS": askPass.path,
+            "SSH_ASKPASS_REQUIRE": "force",
+            "SE_SSHCTL_ASKPASS_MODE": "1",
+        ],
+        input
+    )
 }

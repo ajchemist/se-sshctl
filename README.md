@@ -137,9 +137,21 @@ the local CLI cannot prove that remote authorization was removed or that recover
 access works, so removal stays with Apple's own `sc_auth delete-ctk-identity`
 after you have verified both conditions yourself.
 
-`install` reads the identity-file passphrase from the controlling terminal
-with echo disabled. It does not accept the passphrase through command arguments
-or the environment.
+`install` reads the identity-file passphrase from the controlling terminal with
+echo disabled. It does not accept a passphrase through command arguments or the
+environment, in either direction: `--no-passphrase` selects an empty one and
+needs no terminal, which is how `install` runs over a non-interactive remote
+session, but no flag ever carries a passphrase value.
+
+An unencrypted identity file verifies with no prompt and no terminal. A
+passphrase-protected one is unlocked by reading the passphrase once and handing
+it to OpenSSH over a pipe; that path needs a terminal, and `verify remote` drops
+`BatchMode` for it because OpenSSH uses `BatchMode` to suppress the passphrase
+prompt as well. Every other isolation option stays in place.
+
+The identity file holds a key handle, not exported private-key material, so a
+passphrase here protects a copy of the handle rather than the key. The Secure
+Enclave and the `-t` setting remain the real control.
 
 `identity list` prints identity metadata for the current user. Share this output
 only when you intend to disclose its labels and hashes.

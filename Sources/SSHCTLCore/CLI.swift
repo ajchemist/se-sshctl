@@ -28,7 +28,8 @@ public enum CLI {
         fileManager: FileManager = .default,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         lockDirectory: URL? = nil,
-        identityFilePassphraseReader: (() throws -> Data)? = nil
+        identityFilePassphraseReader: (() throws -> Data)? = nil,
+        identityFileUnlockReader: (() throws -> Data)? = nil
     ) throws -> String {
         if arguments.isEmpty || arguments == ["help"] || arguments == ["--help"] || arguments == ["-h"] {
             return rootHelp
@@ -82,20 +83,32 @@ public enum CLI {
             let options = try Options(
                 Array(arguments.dropFirst()),
                 values: ["--ctk-sha256", "--identity-file"],
-                flags: ["--json"]
+                flags: ["--json", "--no-passphrase"]
             )
             let hash = try options.required("--ctk-sha256")
             let identityFile = options.value("--identity-file")
                 ?? homeDirectory.appendingPathComponent(
                     ".ssh/identities/id_\(String(hash.prefix(16)).lowercased())"
                 ).path
-            guard let identityFilePassphraseReader else {
-                throw CLIError.usage("install requires a controlling terminal for passphrase input")
+            let passphrase: Data
+            if options.has("--no-passphrase") {
+                // The only non-interactive path. It selects an empty
+                // passphrase; it never carries one, so no secret can reach
+                // argv here.
+                passphrase = Data()
+            } else {
+                guard let identityFilePassphraseReader else {
+                    throw CLIError.usage(
+                        "install needs a controlling terminal to read a passphrase; "
+                            + "pass --no-passphrase to install without one"
+                    )
+                }
+                passphrase = try identityFilePassphraseReader()
             }
             let report = try IdentityFileInstaller(executor: executor, fileManager: fileManager).install(
                 ctkSHA256: hash,
                 identityFile: URL(fileURLWithPath: expand(identityFile, homeDirectory: homeDirectory)),
-                passphrase: try identityFilePassphraseReader()
+                passphrase: passphrase
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case ["config", "render"]:
@@ -115,9 +128,15 @@ public enum CLI {
                 values: ["--ctk-sha256", "--identity-file"],
                 flags: ["--json"]
             )
+            let identityFilePath = expand(try options.required("--identity-file"), homeDirectory: homeDirectory)
             let report = try LocalVerifier(executor: executor, fileManager: fileManager).verify(
                 ctkSHA256: try options.required("--ctk-sha256"),
-                identityFile: URL(fileURLWithPath: expand(try options.required("--identity-file"), homeDirectory: homeDirectory))
+                identityFile: URL(fileURLWithPath: identityFilePath),
+                passphrase: try unlockPassphrase(
+                    forIdentityFileAt: identityFilePath,
+                    fileManager: fileManager,
+                    reader: identityFileUnlockReader
+                )
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case ["verify", "remote"]:
@@ -126,10 +145,16 @@ public enum CLI {
                 values: ["--ctk-sha256", "--identity-file", "--target"],
                 flags: ["--json"]
             )
+            let identityFilePath = expand(try options.required("--identity-file"), homeDirectory: homeDirectory)
             let report = try RemoteVerifier(executor: executor, fileManager: fileManager).verify(
                 ctkSHA256: try options.required("--ctk-sha256"),
-                identityFile: expand(try options.required("--identity-file"), homeDirectory: homeDirectory),
-                target: try options.required("--target")
+                identityFile: identityFilePath,
+                target: try options.required("--target"),
+                passphrase: try unlockPassphrase(
+                    forIdentityFileAt: identityFilePath,
+                    fileManager: fileManager,
+                    reader: identityFileUnlockReader
+                )
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         default:
@@ -187,6 +212,29 @@ private struct Options {
         guard let value = values[name], !value.isEmpty else { throw CLIError.usage("missing required option: \(name)") }
         return value
     }
+}
+
+/// Reads a passphrase only when the identity file actually has one.
+///
+/// An unencrypted identity file must stay fully non-interactive so that
+/// verification runs from automation and from a session with no terminal. A
+/// missing file returns nil and lets the verifier report it, so the operator
+/// is not asked to unlock something that is not there.
+private func unlockPassphrase(
+    forIdentityFileAt path: String,
+    fileManager: FileManager,
+    reader: (() throws -> Data)?
+) throws -> Data? {
+    guard fileManager.fileExists(atPath: path), try identityFileIsEncrypted(at: path) else {
+        return nil
+    }
+    guard let reader else {
+        throw CLIError.usage(
+            "this identity file is passphrase-protected, and unlocking it needs a controlling "
+                + "terminal; reinstall with --no-passphrase to verify from automation"
+        )
+    }
+    return try reader()
 }
 
 private func expand(_ path: String, homeDirectory: URL) -> String {
@@ -251,7 +299,7 @@ COMMANDS
   se-sshctl doctor [--json]
   se-sshctl identity list [-t sha1|sha256|ssh] [-e hex|b64] [--json]
   se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--json]
-  se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--json]
+  se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--no-passphrase] [--json]
   se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
   se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
   se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--json]
@@ -334,7 +382,7 @@ OPTIONS
 
 private let installHelp = """
 USAGE
-  se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--json]
+  se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--no-passphrase] [--json]
 
 Runs 'ssh-keygen -K -w /usr/lib/ssh-keychain.dylib' in isolated directories,
 selects by SSH fingerprint, and refuses overwrite. The trusted provider path is fixed, not user-configurable.
@@ -344,10 +392,20 @@ its .pub file is installed mode 0444; newly created parent directories are mode 
 Before download, the command reads an identity-file passphrase twice from the controlling terminal
 with echo disabled, like ssh-keygen. Submit an empty passphrase twice for no passphrase.
 
+--no-passphrase installs without one and needs no terminal, which is how this command runs over
+a non-interactive remote session. It selects an empty passphrase; it never carries a passphrase,
+because an argument value would be visible to every process on the machine.
+
+The identity file holds a key handle, not exported private-key material, so a passphrase here
+protects a copy of the handle rather than the key itself; the Secure Enclave and the -t setting
+remain the real control. A passphrase-protected identity file can still be verified, but only
+from a terminal, because unlocking it requires reading the passphrase.
+
 OPTIONS
   --ctk-sha256 SHA256 Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
   --identity-file PATH  Install the identity file at PATH and its public key at PATH.pub.
                         Default: ~/.ssh/identities/id_<first-16-hash-characters>.
+  --no-passphrase       Install with an empty passphrase and no terminal prompt.
   --json              Emit the versioned machine-readable report instead of text.
 """
 
@@ -402,6 +460,10 @@ OPTIONS
   --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
   --identity-file PATH  Use the installed identity file at PATH and verify its fingerprint.
   --json                Emit the versioned machine-readable report instead of text.
+
+An unencrypted identity file verifies with no prompt and no terminal. If the file is
+passphrase-protected the passphrase is read once from the terminal and delivered to OpenSSH
+over a pipe, never through arguments or the environment.
 """
 
 private let verifyRemoteHelp = """
@@ -425,4 +487,9 @@ OPTIONS
   --identity-file PATH  Use only the installed identity file at PATH.
   --target HOST         Connect to HOST, normally user@hostname, using isolated SSH options.
   --json                Emit the versioned machine-readable report instead of text.
+
+An unencrypted identity file verifies with no prompt and no terminal. Unlocking an encrypted
+one drops BatchMode, because OpenSSH uses BatchMode to suppress the passphrase prompt as well;
+every other isolation option stays, the askpass responder refuses any prompt it does not
+recognise, and the timeout still kills the process tree.
 """

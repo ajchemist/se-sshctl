@@ -18,6 +18,7 @@ public enum OperationalCommandError: Error, LocalizedError, Equatable {
     case identityMetadataAmbiguous
     case providerUntrusted
     case invalidPassphrase
+    case malformedIdentityFile
 
     public var errorDescription: String? {
         switch self {
@@ -34,6 +35,7 @@ public enum OperationalCommandError: Error, LocalizedError, Equatable {
         case .identityMetadataAmbiguous: "identity metadata is duplicated; refusing to guess its CTK SHA-1 hash or SSH fingerprint"
         case .providerUntrusted: "Apple ssh-keychain provider is missing or failed signature verification"
         case .invalidPassphrase: "identity file passphrase must not contain NUL or line-break bytes"
+        case .malformedIdentityFile: "identity file is not an OpenSSH private key container"
         }
     }
 }
@@ -178,4 +180,39 @@ func requireOperationalSuccess(_ result: SubprocessResult) throws {
         let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         throw OperationalCommandError.commandFailed(detail)
     }
+}
+
+/// Whether the OpenSSH private key container at `path` is passphrase-encrypted.
+///
+/// Reads the container's cipher name rather than probing with `ssh-keygen -y`:
+/// a probe cannot separate "encrypted" from "unreadable for some other
+/// reason", and guessing wrong means prompting for a passphrase that does not
+/// exist, which is exactly the hang this tool is supposed to avoid.
+func identityFileIsEncrypted(at path: String) throws -> Bool {
+    let text = try String(contentsOfFile: path, encoding: .utf8)
+    guard let start = text.range(of: "-----BEGIN OPENSSH PRIVATE KEY-----"),
+          let end = text.range(of: "-----END OPENSSH PRIVATE KEY-----"),
+          start.upperBound <= end.lowerBound else {
+        throw OperationalCommandError.malformedIdentityFile
+    }
+    let body = text[start.upperBound..<end.lowerBound]
+        .split(whereSeparator: \Character.isNewline)
+        .joined()
+    guard let decoded = Data(base64Encoded: body) else {
+        throw OperationalCommandError.malformedIdentityFile
+    }
+    // openssh-key-v1\0, then a length-prefixed cipher name. "none" is the
+    // spelling OpenSSH uses for an unencrypted key.
+    let bytes = [UInt8](decoded)
+    let magic = [UInt8]("openssh-key-v1\0".utf8)
+    guard bytes.count > magic.count + 4, Array(bytes.prefix(magic.count)) == magic else {
+        throw OperationalCommandError.malformedIdentityFile
+    }
+    let lengthStart = magic.count
+    let length = bytes[lengthStart..<(lengthStart + 4)].reduce(0) { $0 << 8 | Int($1) }
+    let nameStart = lengthStart + 4
+    guard length > 0, bytes.count >= nameStart + length else {
+        throw OperationalCommandError.malformedIdentityFile
+    }
+    return String(decoding: bytes[nameStart..<(nameStart + length)], as: UTF8.self) != "none"
 }

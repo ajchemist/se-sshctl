@@ -21,10 +21,15 @@ private enum ConsolePassphraseError: Error, LocalizedError {
     case unavailable
 
     var errorDescription: String? {
-        "unable to read identity file passphrase from a controlling terminal"
+        "no controlling terminal to read a passphrase from; "
+            + "install with --no-passphrase to run without one, "
+            + "and note that an identity file that already has a passphrase "
+            + "cannot be verified without a terminal"
     }
 }
 
+/// Reads a new passphrase for an identity file being installed: twice, with
+/// confirmation, like ssh-keygen.
 private func readIdentityFilePassphrase() throws -> Data {
     while true {
         let passphrase = try readPassphrase("Enter passphrase (empty for no passphrase): ")
@@ -32,6 +37,13 @@ private func readIdentityFilePassphrase() throws -> Data {
         if passphrase == confirmation { return passphrase }
         FileHandle.standardError.write(Data("Passphrases do not match. Try again.\n".utf8))
     }
+}
+
+/// Reads an existing passphrase to unlock an already-installed identity file.
+/// Once, with no confirmation: there is nothing to confirm against, and a
+/// wrong entry surfaces as a failed verification.
+private func readIdentityFileUnlockPassphrase() throws -> Data {
+    try readPassphrase("Enter passphrase for identity file: ")
 }
 
 private func readPassphrase(_ prompt: String) throws -> Data {
@@ -53,7 +65,8 @@ do {
     let output = try CLI.run(
         arguments: arguments,
         executor: ProcessExecutor(),
-        identityFilePassphraseReader: readIdentityFilePassphrase
+        identityFilePassphraseReader: readIdentityFilePassphrase,
+        identityFileUnlockReader: readIdentityFileUnlockPassphrase
     )
     FileHandle.standardOutput.write(Data((output + "\n").utf8))
 } catch let failure as VerificationFailed {
