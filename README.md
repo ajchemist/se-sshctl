@@ -220,8 +220,25 @@ OpenSSH server policy. These tests require a controlled physical Mac.
 
 See the [physical-Mac verification record](docs/HARDWARE_VERIFICATION.md) for
 the tested create, install, sign, authenticate, and revoke flow.
-Run [`scripts/verify-bio.sh`](scripts/verify-bio.sh) on a MacBook Air with Touch
-ID to exercise the current source and append a reviewed `bio` run to that record.
+Three wizards exercise the current source on real hardware and append what they
+observe to that record. Each creates a throwaway identity and deletes it again:
+
+- [`scripts/verify-bio.sh`](scripts/verify-bio.sh) — a `bio` run on a MacBook Air
+  with Touch ID.
+- [`scripts/verify-none-remote.sh`](scripts/verify-none-remote.sh) — whether a
+  `none` identity signs and authenticates from an SSH session with the console
+  locked, logged out, and after a reboot before first unlock. Run it over SSH,
+  once per context; state survives the reboot. This is the situation `-t none`
+  exists for and the one nobody has measured.
+- [`scripts/verify-cert-expiry.sh`](scripts/verify-cert-expiry.sh) — whether an
+  expired X.509 certificate stops OpenSSH from using the Secure Enclave key
+  behind it. It replaces the certificate through `sc_auth create-ctk-csr` and
+  `import-ctk-certificate`, so the private key is unchanged between the two
+  measurements. Needs an OpenSSL 3 binary; macOS ships LibreSSL, which cannot
+  backdate `notAfter`.
+
+None of these has been run yet. Their questions are open, and a "still works"
+answer is as useful as a break.
 
 ## Development
 

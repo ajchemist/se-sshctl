@@ -36,9 +36,9 @@ banner() {
   _clear
   printf '\n%s%s  %s%s\n' "$BOLD" "$BLUE" "$1" "$RESET"
   printf '%s  %s stages%s\n\n' "$DIM" "$TOTAL_STAGES" "$RESET"
-  printf '%s  You drive the browser; this wizard tells you exactly what to do and\n' "$DIM"
-  printf '  captures the values you copy back. Stop any time with Ctrl-C and re-run\n'
-  printf '  later — it remembers values already saved.%s\n' "$RESET"
+  printf '%s  This wizard tells you exactly what to do on this Mac and records what\n' "$DIM"
+  printf '  it observes. Stop any time with Ctrl-C; anything it created is reported\n'
+  printf '  so you can clean up by hand.%s\n' "$RESET"
   pause "Ready to start?"
 }
 
