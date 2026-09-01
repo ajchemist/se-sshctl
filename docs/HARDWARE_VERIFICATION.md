@@ -189,3 +189,69 @@ Not established: whether `sc_auth list-ctk-identities` can enumerate while
 logged out, and whether an already-created identity can sign there. Those are
 what the `logged-out` row of the `-t none` table measures, and it is still
 unmeasured.
+
+## -t none remote-session verification — 2026-09-01
+
+Measured from an SSH session on physical hardware:
+
+```text
+host:       macbookair-m1
+model:      MacBook Air (MacBookAir10,1)
+chip:       Apple M1
+macOS:      26.6.2
+OpenSSH:    OpenSSH_10.3p1, LibreSSL 3.3.6
+params:     -k p-256-ne -t none --allow-unattended-signing
+```
+
+| Console state | local signing | localhost authentication |
+| --- | --- | --- |
+| unlocked | passed | passed |
+| locked | passed | passed |
+| logged-out | **failed** | **failed** |
+| pre-first-unlock | not-run | not-run |
+
+Each row is one SSH session into this Mac. "local signing" is `ssh-keygen -Y
+sign` through the Apple provider; "localhost authentication" is a real
+public-key SSH authentication using only the Secure Enclave identity file, with
+the agent, user config, and every password method disabled.
+
+The rows were measured across source revisions `b067142`…`d35f90d`, minutes
+apart. The wizard now records the revision per row; this table predates that, so
+it is stated here instead of implied.
+
+### Why logged-out failed
+
+Not a missing identity and not a refused approval. `sc_auth` still enumerated
+the identity, OpenSSH still loaded the key and had the server accept it, and the
+provider still opened. The signature itself could not be produced:
+
+```text
+debug1: Server accepts key: ... ECDSA-SK SHA256:4sByC0sk... explicit authenticator
+debug1: sshsk_open: provider /usr/lib/ssh-keychain.dylib implements version 0x000a0000
+debug1: sshsk_sign: sk_sign failed with code -4
+debug1: ssh-sk-helper: Signing failed: device not found
+sign_and_send_pubkey: signing failed for ECDSA-SK "...": device not found
+```
+
+`verify local` failed the same way: `Couldn't sign message: device not found`.
+
+**The Secure Enclave token requires a console session.** Locking the screen keeps
+it; logging out removes it.
+
+### Why pre-first-unlock is not-run
+
+FileVault is enabled on this Mac. Reaching that context requires SSH to be
+answering after a reboot with nobody having authenticated, and with FileVault the
+pre-boot authentication that starts the system is itself a login. It was not
+attempted, so nothing is claimed about it.
+
+Its outcome is strongly implied by the logged-out row — a state with no session
+at all cannot do what a logged-out one already cannot — but an implication is not
+a measurement, so the row stays `not-run`.
+
+### What this establishes
+
+The workflow `-t none` exists for — a remote Mac initiating outbound SSH with
+nobody at its console — works, on the condition that the account stays logged in.
+The screen may be locked. This is the tool's central operational constraint and
+is recorded in README.md and docs/THREAT_MODEL.md.

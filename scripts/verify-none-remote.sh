@@ -195,15 +195,18 @@ if [[ "$CONTEXT" == "report" ]]; then
     printf 'chip:       %s\n' "${CHIP:-unknown}"
     printf 'macOS:      %s\n' "${MACOS_VERSION:-unknown}"
     printf 'OpenSSH:    %s\n' "${OPENSSH_VERSION:-unknown}"
-    printf 'source:     %s\n' "${SOURCE_REVISION:-unknown}"
     printf 'params:     -k p-256-ne -t none --allow-unattended-signing\n'
     printf '```\n\n'
-    printf '| Console state | local signing | localhost authentication |\n'
-    printf '| --- | --- | --- |\n'
+    printf '| Console state | local signing | localhost authentication | source |\n'
+    printf '| --- | --- | --- | --- |\n'
     for context in unlocked locked logged-out pre-first-unlock; do
       local_var="LOCAL_${context//-/_}"
       remote_var="REMOTE_${context//-/_}"
-      printf '| %s | %s | %s |\n' "$context" "${!local_var:-not-run}" "${!remote_var:-not-run}"
+      source_var="SOURCE_${context//-/_}"
+      # Per row: contexts are measured minutes or days apart, and recording one
+      # revision for the whole table claims evidence the run does not have.
+      printf '| %s | %s | %s | %s |\n' "$context" \
+        "${!local_var:-not-run}" "${!remote_var:-not-run}" "${!source_var:-—}"
     done
     for context in unlocked locked logged-out pre-first-unlock; do
       detail_var="DETAIL_${context//-/_}"
@@ -275,7 +278,7 @@ save_state CHIP "$(printf '%s\n' "$HARDWARE" | /usr/bin/awk -F': ' '/Chip/{print
 save_state HOST_NAME "$(/usr/sbin/scutil --get LocalHostName 2>/dev/null || /bin/hostname -s)"
 save_state MACOS_VERSION "$(/usr/bin/plutil -extract platform.version raw -o - "$DOCTOR_JSON")"
 save_state OPENSSH_VERSION "$(/usr/bin/plutil -extract openSSH.version raw -o - "$DOCTOR_JSON")"
-save_state SOURCE_REVISION "$(cd "$REPO_ROOT" && /usr/bin/git rev-parse HEAD)"
+save_state "SOURCE_${CONTEXT//-/_}" "$(cd "$REPO_ROOT" && /usr/bin/git rev-parse --short HEAD)"
 load_state
 
 # ── console state ─────────────────────────────────────────────────────────
