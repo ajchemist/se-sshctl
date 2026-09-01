@@ -190,11 +190,18 @@ private func expand(_ path: String, homeDirectory: URL) -> String {
 }
 
 private func human(_ report: DoctorReport) -> String {
+    // docs/THREAT_MODEL.md requires path, signature validity, identifier, and
+    // Apple anchor evidence to stay separately readable, so a provider that is
+    // signed but not Apple-anchored cannot be confused with a trusted one.
     """
     macOS \(report.platform.version) (\(report.platform.build)) \(report.platform.architecture)
-    OpenSSH: \(report.openSSH.version ?? "unknown")
-    sc_auth: \(report.scAuth.available ? "available" : "missing")
-    provider: \(report.provider.signatureValid && report.provider.appleAnchored ? "verified" : "unverified")
+    OpenSSH: \(report.openSSH.version ?? "unknown") (\(report.openSSH.path))
+    sc_auth: \(report.scAuth.available ? "available" : "missing") (\(report.scAuth.path))
+    provider: \(report.provider.path)
+      present:    \(report.provider.available ? "yes" : "no")
+      signature:  \(report.provider.signatureValid ? "valid" : "invalid")
+      anchor:     \(report.provider.appleAnchored ? "apple" : "not apple")
+      identifier: \(report.provider.identifier ?? "unknown")
     """
 }
 

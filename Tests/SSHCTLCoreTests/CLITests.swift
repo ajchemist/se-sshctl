@@ -22,6 +22,48 @@ import Testing
     #expect(output.contains(#""appleAnchored":true"#))
 }
 
+@Test func doctorTextOutputKeepsEveryProviderEvidenceFieldSeparate() throws {
+    // docs/THREAT_MODEL.md trust boundary 2: path, signature validity,
+    // identifier, and Apple anchor evidence are four independent signals.
+    // A provider that verifies but is anchored elsewhere must not read as
+    // trusted, so this fixture signs successfully under a non-Apple anchor.
+    let executor = FakeSubprocessExecutor(results: [
+        .success(cliResult(stdout: "26.6.1\n")),
+        .success(cliResult(stdout: "25G76\n")),
+        .success(cliResult(stdout: "arm64\n")),
+        .success(cliResult(stderr: "OpenSSH_10.3p1\n")),
+        .success(cliResult()),
+        .success(cliResult(stderr: "designated => identifier \"com.example.impostor\" and anchor trusted\n")),
+    ])
+
+    let output = try CLI.run(arguments: ["doctor"], executor: executor, pathExists: { _ in true })
+
+    #expect(output.contains("/usr/lib/ssh-keychain.dylib"))
+    #expect(output.contains("present:    yes"))
+    #expect(output.contains("signature:  valid"))
+    #expect(output.contains("anchor:     not apple"))
+    #expect(output.contains("identifier: unknown"))
+    #expect(!output.contains("verified"))
+}
+
+@Test func doctorTextOutputNamesATrustedProviderInFull() throws {
+    let executor = FakeSubprocessExecutor(results: [
+        .success(cliResult(stdout: "26.6.1\n")),
+        .success(cliResult(stdout: "25G76\n")),
+        .success(cliResult(stdout: "arm64\n")),
+        .success(cliResult(stderr: "OpenSSH_10.3p1\n")),
+        .success(cliResult()),
+        .success(cliResult(stderr: "designated => identifier \"com.apple.ssh-keychain\" and anchor apple\n")),
+    ])
+
+    let output = try CLI.run(arguments: ["doctor"], executor: executor, pathExists: { _ in true })
+
+    #expect(output.contains("signature:  valid"))
+    #expect(output.contains("anchor:     apple"))
+    #expect(output.contains("identifier: com.apple.ssh-keychain"))
+    #expect(output.contains("/usr/sbin/sc_auth"))
+}
+
 @Test func cliHelpDocumentsTheCompleteLocalLifecycleWithoutRunningCommands() throws {
     let executor = FakeSubprocessExecutor(results: [])
 
