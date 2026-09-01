@@ -175,7 +175,7 @@ it:
 
 ```sh
 se-sshctl manifest list
-se-sshctl manifest prune     # drop records whose identity file or CTK identity is gone
+se-sshctl manifest prune     # clean up after 'sc_auth delete-ctk-identity'
 ```
 
 Results accumulate per check. A `verify local` run updates provider load and
@@ -194,10 +194,22 @@ without seeing its age, which is why the age is never omitted. Records are
 written only after the fingerprint check matched.
 
 The store is a single file at
-`~/Library/Application Support/se-sshctl/manifest.json`, mode 0600. `prune` is
-the cleanup path when an identity file is removed directly or a CTK identity is
-deleted with `sc_auth`; it never touches identity files or CTK identities
-itself.
+`~/Library/Application Support/se-sshctl/manifest.json`, mode 0600.
+
+`prune` is the cleanup path after `sc_auth delete-ctk-identity`. Deleting the
+enclave key leaves two dead things behind, and `prune` removes both: the record,
+and the identity file with its `.pub`, which hold nothing but a handle to the key
+that was just destroyed. Neither can ever be used again, and `install` cannot
+recreate the file because there is no identity left to download it from — leaving
+it would keep a convincing-looking private key on disk that authenticates
+nothing.
+
+A file is deleted only when its `.pub` still carries the recorded SSH
+fingerprint, so a path reused for another key is left alone and reported.
+`prune` never deletes a CTK identity, and never touches a file whose CTK identity
+is still present.
+
+Breaking changes and their migrations are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 

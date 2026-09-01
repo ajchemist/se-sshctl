@@ -131,10 +131,17 @@ public enum CLI {
                 try IdentityLister(executor: executor).list().identities
                     .map { $0.ctkPublicKeyHash.uppercased() }
             )
-            let removed = try manifestStore.prune(knownIdentityHashes: known)
+            let outcome = try manifestStore.prune(knownIdentityHashes: known) { entry in
+                // Delete only the key this record is about. If the path was
+                // reused, its fingerprint no longer matches and the file stays.
+                let found = try? readFingerprint(
+                    executor: executor, publicKeyPath: entry.identityFile + ".pub"
+                )
+                return found == entry.sshFingerprint
+            }
             return options.has("--json")
-                ? try JSONOutput.encode(ManifestPruneReport(removed: removed))
-                : human(pruned: removed)
+                ? try JSONOutput.encode(ManifestPruneReport(outcome: outcome))
+                : human(pruned: outcome)
         case ["config", "render"]:
             let options = try Options(
                 Array(arguments.dropFirst(2)),
@@ -246,9 +253,17 @@ private struct Options {
 }
 
 public struct ManifestPruneReport: Encodable, Equatable, Sendable {
-    public let schemaVersion = 1
+    public let schemaVersion = 2
     public let status = "pruned"
-    public let removed: [ManifestEntry]
+    public let removedRecords: [ManifestEntry]
+    public let removedFiles: [String]
+    public let keptFiles: [String]
+
+    public init(outcome: ManifestPruneOutcome) {
+        self.removedRecords = outcome.removedRecords
+        self.removedFiles = outcome.removedFiles
+        self.keptFiles = outcome.keptFiles
+    }
 }
 
 /// Runs a verification and records it either way.
@@ -345,10 +360,22 @@ private func human(_ manifest: VerificationManifest, now: Date) -> String {
     }.joined(separator: "\n\n")
 }
 
-private func human(pruned entries: [ManifestEntry]) -> String {
-    guard !entries.isEmpty else { return "Nothing to prune." }
-    return "Pruned \(entries.count) record(s) whose identity file or CTK identity is gone:\n"
-        + entries.map { "  \($0.ctkSHA256)  \($0.identityFile)" }.joined(separator: "\n")
+private func human(pruned outcome: ManifestPruneOutcome) -> String {
+    guard !outcome.isEmpty else { return "Nothing to prune." }
+    var lines: [String] = []
+    if !outcome.removedRecords.isEmpty {
+        lines.append("Removed \(outcome.removedRecords.count) record(s):")
+        lines += outcome.removedRecords.map { "  \($0.ctkSHA256)  \($0.identityFile)" }
+    }
+    if !outcome.removedFiles.isEmpty {
+        lines.append("Deleted \(outcome.removedFiles.count) file(s) left by a deleted CTK identity:")
+        lines += outcome.removedFiles.map { "  \($0)" }
+    }
+    if !outcome.keptFiles.isEmpty {
+        lines.append("Left in place — the path no longer holds the recorded key:")
+        lines += outcome.keptFiles.map { "  \($0)" }
+    }
+    return lines.joined(separator: "\n")
 }
 
 /// An outcome is never shown without its age. A `passed` from months ago is a
@@ -566,15 +593,26 @@ private let manifestPruneHelp = """
 USAGE
   se-sshctl manifest prune [--json]
 
-Removes records whose identity file is gone from disk or whose CTK identity is no
-longer in the inventory, and prints what it removed. Nothing else is deleted:
-prune never touches identity files, public keys, or CTK identities.
+This is the cleanup path after 'sc_auth delete-ctk-identity'. Deleting the enclave
+key leaves two dead things behind, and prune removes both:
 
-This is the cleanup path for records orphaned by removing an identity file
-directly, or by deleting a CTK identity with 'sc_auth delete-ctk-identity'.
+  the record, which describes an identity that no longer exists;
+  the identity file and its .pub, which hold nothing but a handle to the key that
+  was just destroyed.
+
+Neither can ever be used again, and 'install' cannot recreate the file, because
+there is no identity left to download it from. Leaving the file would keep a
+convincing-looking private key on disk that authenticates nothing.
+
+A record whose identity file is already missing is dropped with nothing to delete.
+A file is deleted only when its .pub still carries the recorded SSH fingerprint;
+if the path was reused for another key, the file is left alone and reported.
+
+prune never deletes a CTK identity and never touches a file whose CTK identity is
+still present.
 
 OPTIONS
-  --json  Emit the removed records as versioned JSON.
+  --json  Emit the removed records, deleted files, and kept files as versioned JSON.
 """
 
 private let configHelp = """

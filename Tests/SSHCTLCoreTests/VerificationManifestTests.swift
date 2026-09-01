@@ -80,25 +80,82 @@ import Testing
     let removed = try store.prune(knownIdentityHashes: [hash])
 
     // One record lost its file, one lost its CTK identity.
-    #expect(removed.count == 2)
+    #expect(removed.removedRecords.count == 2)
     let kept = try store.load().identities
     #expect(kept.count == 1)
     #expect(kept[0].ctkSHA256 == hash)
     #expect(kept[0].identityFile == present)
 }
 
-@Test func pruneNeverTouchesTheIdentityFilesThemselves() throws {
+@Test func pruneDeletesTheFileLeftBehindByADeletedCTKIdentity() throws {
+    // The identity file holds a handle to an enclave key that no longer exists.
+    // It can never authenticate again and install cannot recreate it, so
+    // leaving it would keep a convincing-looking private key on disk.
     let root = uniqueDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    let present = root.appendingPathComponent("kept").path
-    try Data("identityFile".utf8).write(to: URL(fileURLWithPath: present))
+    let identityFile = root.appendingPathComponent("dead").path
+    try Data("identityFile".utf8).write(to: URL(fileURLWithPath: identityFile))
+    try Data("public".utf8).write(to: URL(fileURLWithPath: identityFile + ".pub"))
     let store = VerificationManifestStore(directory: root)
-    try store.record(localReport(), identityFile: present)
+    try store.record(localReport(), identityFile: identityFile)
+
+    let outcome = try store.prune(knownIdentityHashes: [])
+
+    #expect(outcome.removedFiles.sorted() == [identityFile, identityFile + ".pub"].sorted())
+    #expect(!FileManager.default.fileExists(atPath: identityFile))
+    #expect(!FileManager.default.fileExists(atPath: identityFile + ".pub"))
+}
+
+@Test func pruneLeavesTheFileAloneWhileItsCTKIdentityStillExists() throws {
+    let root = uniqueDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let identityFile = root.appendingPathComponent("live").path
+    try Data("identityFile".utf8).write(to: URL(fileURLWithPath: identityFile))
+    let hash = String(repeating: "A", count: 64)
+    let store = VerificationManifestStore(directory: root)
+    try store.record(localReport(ctkSHA256: hash), identityFile: identityFile)
+
+    let outcome = try store.prune(knownIdentityHashes: [hash])
+
+    #expect(outcome.isEmpty)
+    #expect(FileManager.default.fileExists(atPath: identityFile))
+}
+
+@Test func pruneRefusesToDeleteAPathThatNowHoldsADifferentKey() throws {
+    // The warrant covers one key. If the path was reused, this is not it.
+    let root = uniqueDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let identityFile = root.appendingPathComponent("reused").path
+    try Data("someone else's key".utf8).write(to: URL(fileURLWithPath: identityFile))
+    let store = VerificationManifestStore(directory: root)
+    try store.record(localReport(), identityFile: identityFile)
+
+    let outcome = try store.prune(knownIdentityHashes: []) { _ in false }
+
+    #expect(outcome.removedRecords.count == 1)
+    #expect(outcome.removedFiles.isEmpty)
+    #expect(outcome.keptFiles == [identityFile])
+    #expect(FileManager.default.fileExists(atPath: identityFile))
+}
+
+@Test func pruneNeverDeletesACTKIdentity() throws {
+    let root = uniqueDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let identityFile = root.appendingPathComponent("dead").path
+    try Data("identityFile".utf8).write(to: URL(fileURLWithPath: identityFile))
+    let store = VerificationManifestStore(directory: root)
+    try store.record(localReport(), identityFile: identityFile)
+    let executor = FakeSubprocessExecutor(results: [])
 
     _ = try store.prune(knownIdentityHashes: [])
 
-    #expect(FileManager.default.fileExists(atPath: present))
+    // Deletion of the enclave key stays with sc_auth; this command only clears
+    // up after it. See Beads decision se-sshctl-9jy.
+    #expect(executor.requests.isEmpty)
 }
 
 @Test func theStoreIsPrivateToItsOwner() throws {

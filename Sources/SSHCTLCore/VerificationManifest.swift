@@ -38,6 +38,18 @@ public struct ManifestEntry: Codable, Equatable, Sendable {
     public var target: String?
 }
 
+public struct ManifestPruneOutcome: Codable, Equatable, Sendable {
+    public let removedRecords: [ManifestEntry]
+    public let removedFiles: [String]
+    /// Files left in place because the path no longer holds the recorded key,
+    /// or could not be removed. Reported rather than retried silently.
+    public let keptFiles: [String]
+
+    public var isEmpty: Bool {
+        removedRecords.isEmpty && removedFiles.isEmpty && keptFiles.isEmpty
+    }
+}
+
 public struct VerificationManifest: Codable, Equatable, Sendable {
     public let schemaVersion = 1
     public var identities: [ManifestEntry]
@@ -125,18 +137,61 @@ public struct VerificationManifestStore {
         return true
     }
 
-    /// Drops entries whose identity file or CTK identity is gone. Returns what
-    /// was removed so the operator sees it rather than having records vanish.
-    public func prune(knownIdentityHashes: Set<String>) throws -> [ManifestEntry] {
+    /// Cleans up after a CTK identity that no longer exists.
+    ///
+    /// Deleting the enclave key leaves two dead things behind: this record, and
+    /// the identity file itself, which holds nothing but a handle to the key
+    /// that was just destroyed. Neither can ever be used again, and `install`
+    /// cannot recreate the file because there is no longer an identity to
+    /// download. Removing the record but leaving the file would keep a
+    /// convincing-looking private key on disk that authenticates nothing.
+    ///
+    /// A record whose file is simply missing is dropped with nothing to delete.
+    ///
+    /// `identityFileStillMatches` guards the deletion: if the path now holds a
+    /// different key — reused for another identity, or replaced by hand — the
+    /// file is left alone and reported, because this function's warrant covers
+    /// exactly one key and it is not that one.
+    public func prune(
+        knownIdentityHashes: Set<String>,
+        identityFileStillMatches: (ManifestEntry) -> Bool = { _ in true }
+    ) throws -> ManifestPruneOutcome {
         var manifest = try load()
-        let orphaned = manifest.identities.filter {
-            !fileManager.fileExists(atPath: $0.identityFile)
-                || !knownIdentityHashes.contains($0.ctkSHA256)
+        var removedRecords: [ManifestEntry] = []
+        var removedFiles: [String] = []
+        var keptFiles: [String] = []
+
+        for entry in manifest.identities {
+            let fileExists = fileManager.fileExists(atPath: entry.identityFile)
+            let identityExists = knownIdentityHashes.contains(entry.ctkSHA256)
+            guard !identityExists || !fileExists else { continue }
+            removedRecords.append(entry)
+            guard !identityExists, fileExists else { continue }
+            guard identityFileStillMatches(entry) else {
+                keptFiles.append(entry.identityFile)
+                continue
+            }
+            do {
+                try fileManager.removeItem(atPath: entry.identityFile)
+                removedFiles.append(entry.identityFile)
+                let publicKey = entry.identityFile + ".pub"
+                if fileManager.fileExists(atPath: publicKey) {
+                    try fileManager.removeItem(atPath: publicKey)
+                    removedFiles.append(publicKey)
+                }
+            } catch {
+                keptFiles.append(entry.identityFile)
+            }
         }
-        guard !orphaned.isEmpty else { return [] }
-        manifest.identities.removeAll { entry in orphaned.contains { $0 == entry } }
+
+        guard !removedRecords.isEmpty else {
+            return ManifestPruneOutcome(removedRecords: [], removedFiles: [], keptFiles: keptFiles)
+        }
+        manifest.identities.removeAll { entry in removedRecords.contains { $0 == entry } }
         try write(manifest)
-        return orphaned
+        return ManifestPruneOutcome(
+            removedRecords: removedRecords, removedFiles: removedFiles, keptFiles: keptFiles
+        )
     }
 
     /// A check that did not run leaves the stored answer alone. Overwriting it
