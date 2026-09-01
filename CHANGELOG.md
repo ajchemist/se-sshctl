@@ -1,9 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
-This release breaks compatibility in several places. Every break is listed
-here with what replaces it.
+Breaks compatibility in several places. Every break is listed here with what
+replaces it.
+
+It also records the first measurement of the workflow this tool exists for:
+**`-t none` requires a console session.** From an SSH session, signing and SSH
+authentication work while the account is logged in at the console, unlocked or
+locked. Logged out they fail — the identity still lists and the server still
+accepts the key, but the provider reports `device not found`. An unattended Mac
+has to stay logged in; the screen may be locked. See
+`docs/HARDWARE_VERIFICATION.md`.
 
 ### Changed: `se-sshctl identity delete`
 
@@ -99,5 +107,9 @@ file and `.pub` left behind by a deleted CTK identity.
   which `sc_auth` subcommands this tool deliberately does not wrap.
 - `verify remote` runs the client verbosely and carries the log into the report.
 - `doctor` warns below macOS 26 without blocking.
-- `scripts/verify-none-remote.sh` and `scripts/verify-cert-expiry.sh` measure
-  two questions nobody has answered yet.
+- `se-sshctl --version`, and `seSSHCTL` in the `doctor` report. With schema
+  versions moving, a binary that cannot say which build it is leaves an
+  operator unable to tell whether output has the shape they expect. The release
+  workflow refuses a tag whose version constant does not match it.
+- `scripts/verify-none-remote.sh` and `scripts/verify-cert-expiry.sh`, which
+  measured the two questions above. Both are runnable again on other hardware.

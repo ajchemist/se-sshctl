@@ -64,6 +64,30 @@ import Testing
     #expect(output.contains("/usr/sbin/sc_auth"))
 }
 
+@Test func theBinaryReportsItsOwnVersion() throws {
+    // Schema versions moved several times in one release. A binary that cannot
+    // say which build it is leaves an operator unable to tell whether the
+    // output they are looking at is the shape they expect.
+    let executor = FakeSubprocessExecutor(results: [])
+
+    #expect(try CLI.run(arguments: ["--version"], executor: executor) == "se-sshctl \(seSSHCTLVersion)")
+    #expect(try CLI.run(arguments: ["version"], executor: executor) == "se-sshctl \(seSSHCTLVersion)")
+    #expect(executor.requests.isEmpty)
+}
+
+@Test func doctorNamesTheBuildThatProducedTheReport() throws {
+    let executor = FakeSubprocessExecutor(results: healthyDoctorResults())
+
+    let json = try CLI.run(
+        arguments: ["doctor", "--json"],
+        executor: executor,
+        pathExists: { _ in true },
+        consoleUser: { "operator" }
+    )
+
+    #expect(json.contains(#""seSSHCTL":"\#(seSSHCTLVersion)""#))
+}
+
 @Test func doctorWarnsWhenNobodyIsLoggedInAtTheConsole() throws {
     // Measured on macOS 26.6.2: a logged-out Mac still enumerates its CTK
     // identities but cannot sign — "device not found". Every binary check

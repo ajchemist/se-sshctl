@@ -50,6 +50,9 @@ public struct ProviderReport: Codable, Equatable, Sendable {
 
 public struct DoctorReport: Codable, Equatable, Sendable {
     public let schemaVersion: Int
+    /// Which build produced this report. A report that cannot say what made it
+    /// is hard to act on once the schema has moved.
+    public let seSSHCTL: String
     public let platform: PlatformReport
     public let scAuth: ToolReport
     public let openSSH: ToolReport
@@ -132,6 +135,7 @@ public struct Doctor {
         let sshVersion = try successfulOutput(SubprocessRequest(executable: .ssh, arguments: ["-V"]))
         return DoctorReport(
             schemaVersion: 2,
+            seSSHCTL: seSSHCTLVersion,
             platform: PlatformReport(version: version, build: build, architecture: architecture),
             scAuth: ToolReport(path: SystemExecutable.scAuth.path, available: pathExists(SystemExecutable.scAuth.path), version: nil),
             openSSH: ToolReport(

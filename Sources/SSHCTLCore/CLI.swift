@@ -40,6 +40,9 @@ public enum CLI {
         if arguments.isEmpty || arguments == ["help"] || arguments == ["--help"] || arguments == ["-h"] {
             return rootHelp
         }
+        if arguments == ["--version"] || arguments == ["version"] {
+            return "se-sshctl \(seSSHCTLVersion)"
+        }
         if arguments == ["identity", "--help"] || arguments == ["identity", "-h"] {
             return identityHelp
         }
@@ -347,6 +350,7 @@ private func human(_ report: DoctorReport) -> String {
     // Apple anchor evidence to stay separately readable, so a provider that is
     // signed but not Apple-anchored cannot be confused with a trusted one.
     var lines = """
+    se-sshctl \(report.seSSHCTL)
     macOS \(report.platform.version) (\(report.platform.build)) \(report.platform.architecture)
     OpenSSH: \(report.openSSH.version ?? "unknown") (\(report.openSSH.path))
     sc_auth: \(report.scAuth.available ? "available" : "missing") (\(report.scAuth.path))
@@ -511,6 +515,7 @@ private let rootHelp = """
 se-sshctl manages Apple CryptoTokenKit/Secure Enclave SSH identities.
 
 COMMANDS
+  se-sshctl --version
   se-sshctl doctor [--json]
   se-sshctl identity list [-t sha1|sha256|ssh] [-e hex|b64] [--json]
   se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--json]

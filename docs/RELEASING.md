@@ -33,9 +33,14 @@ the workflow.
 
 ## Release
 
+Bump `seSSHCTLVersion` in `Sources/SSHCTLCore/Version.swift` and set the
+matching `CHANGELOG.md` heading first, in the commit the tag will point at. The
+workflow refuses to publish a tag whose version constant does not match it, so a
+released binary cannot report a version it was not built for.
+
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 To retry after a failure, run the `Release` workflow manually with the existing
