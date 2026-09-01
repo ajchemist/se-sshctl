@@ -337,6 +337,65 @@ import Testing
     #expect(clientLog.contains("Permission denied"))
 }
 
+@Test func remoteVerificationCannotBorrowAnAgentIdentity() throws {
+    // A stale identity in a running ssh-agent could authenticate and make a
+    // broken Secure Enclave setup look verified. Every ambient identity source
+    // is refused, and an inherited SSH_AUTH_SOCK is never re-exported.
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
+    try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
+    let executor = OperationalExecutor()
+
+    _ = try RemoteVerifier(executor: executor).verify(
+        ctkSHA256: hash, identityFile: identityFile.path, target: "deploy@example.test"
+    )
+
+    let ssh = executor.requests.first { $0.executable == .ssh }!
+    #expect(ssh.arguments.contains("IdentityAgent=none"))
+    #expect(ssh.arguments.contains("IdentitiesOnly=yes"))
+    #expect(ssh.arguments.contains("ForwardAgent=no"))
+    // -F none: a user ~/.ssh/config could otherwise add IdentityFile entries.
+    #expect(ssh.arguments.contains("-F"))
+    #expect(ssh.environment["SSH_AUTH_SOCK"] == nil)
+    // Exactly one identity is offered, and it is the one under test.
+    #expect(ssh.arguments.count(where: { $0.hasPrefix("IdentityFile=") }) == 1)
+    #expect(ssh.arguments.contains("IdentityFile=\(identityFile.path)"))
+}
+
+@Test func everySubprocessUsesAFixedAppleSystemPath() throws {
+    // A Homebrew ssh or ssh-keygen earlier on PATH does not carry Apple's
+    // security-key provider support, so resolving these by name would silently
+    // verify against the wrong binary. SystemExecutable pins absolute paths.
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
+    try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
+    let executor = OperationalExecutor()
+
+    _ = try LocalVerifier(executor: executor).verify(ctkSHA256: hash, identityFile: identityFile)
+    _ = try RemoteVerifier(executor: executor).verify(
+        ctkSHA256: hash, identityFile: identityFile.path, target: "deploy@example.test"
+    )
+
+    #expect(!executor.requests.isEmpty)
+    for request in executor.requests {
+        #expect(request.executable.path.hasPrefix("/usr/"))
+        #expect(!request.environment.keys.contains("PATH"))
+    }
+    for executable in SystemExecutable.allCases {
+        #expect(executable.path.hasPrefix("/usr/"))
+    }
+}
+
 private final class OperationalExecutor: SubprocessExecuting {
     private(set) var requests: [SubprocessRequest] = []
     private let duplicateMetadata: Bool
