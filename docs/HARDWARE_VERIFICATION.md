@@ -152,3 +152,35 @@ the Secure Enclave identity file, with the agent, user config, and
 every password method disabled.
 
 A `not-run` row was never attempted and says nothing about that context.
+
+## Identity creation while logged out — 2026-09-01
+
+```text
+host:   macbookair-m1
+model:  MacBook Air (MacBookAir10,1), Apple M1
+macOS:  26.6.2
+```
+
+Observed by accident, while trying to start the `-t none` sequence in the
+logged-out context on a machine that had no test identity yet.
+
+`sc_auth create-ctk-identity -l LABEL -k p-256-ne -t none` **exited 0 and created
+nothing.** `se-sshctl identity create` caught it, because it compares the
+inventory before and after rather than trusting the exit status, and reported
+"creation returned success but discovered 0 new identities; no rollback was
+performed".
+
+Confirmed afterwards from a logged-in session: no identity with that label
+existed. So this was a silent creation failure, not an inventory that could not
+be read — had the identity been created and merely been invisible at the time,
+it would have shown up later. It did not.
+
+Consequence for this tool: creating a CTK identity requires a console session.
+`scripts/verify-none-remote.sh` now refuses to create outside its baseline
+context, so a setup failure in a degraded context cannot be mistaken for a
+measurement of whether an existing key can still sign.
+
+Not established: whether `sc_auth list-ctk-identities` can enumerate while
+logged out, and whether an already-created identity can sign there. Those are
+what the `logged-out` row of the `-t none` table measures, and it is still
+unmeasured.
