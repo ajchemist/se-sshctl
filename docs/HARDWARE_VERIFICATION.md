@@ -175,6 +175,11 @@ existed. So this was a silent creation failure, not an inventory that could not
 be read — had the identity been created and merely been invisible at the time,
 it would have shown up later. It did not.
 
+Independently confirmed later in the same logged-out state: `sc_auth
+list-ctk-identities` enumerates normally there. Enumeration was never the
+problem, so the before/after comparison that caught this was reading a true
+inventory.
+
 Consequence for this tool: creating a CTK identity requires a console session.
 `scripts/verify-none-remote.sh` now refuses to create outside its baseline
 context, so a setup failure in a degraded context cannot be mistaken for a

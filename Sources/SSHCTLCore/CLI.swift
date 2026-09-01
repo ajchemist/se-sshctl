@@ -29,6 +29,7 @@ public enum CLI {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         lockDirectory: URL? = nil,
         manifestDirectory: URL? = nil,
+        consoleUser: @escaping () -> String? = { currentConsoleUser() },
         identityFilePassphraseReader: (() throws -> Data)? = nil,
         identityFileUnlockReader: (() throws -> Data)? = nil,
         now: @escaping () -> Date = Date.init
@@ -51,9 +52,13 @@ public enum CLI {
 
         switch Array(arguments.prefix(2)) {
         case ["doctor", "--json"] where arguments.count == 2:
-            return try JSONOutput.encode(Doctor(executor: executor, pathExists: pathExists).report())
+            return try JSONOutput.encode(
+                Doctor(executor: executor, pathExists: pathExists, consoleUser: consoleUser).report()
+            )
         case ["doctor"] where arguments.count == 1:
-            return human(try Doctor(executor: executor, pathExists: pathExists).report())
+            return human(
+                try Doctor(executor: executor, pathExists: pathExists, consoleUser: consoleUser).report()
+            )
         case ["identity", "list"]:
             let options = try Options(
                 Array(arguments.dropFirst(2)), values: ["-t", "-e"], flags: ["--json"]
@@ -350,7 +355,18 @@ private func human(_ report: DoctorReport) -> String {
       signature:  \(report.provider.signatureValid ? "valid" : "invalid")
       anchor:     \(report.provider.appleAnchored ? "apple" : "not apple")
       identifier: \(report.provider.identifier ?? "unknown")
+    console session: \(report.consoleSession ?? "none")
     """
+    if report.consoleSession == nil {
+        lines += """
+        \n
+        warning: nobody is logged in at the console. Every check above inspects a \
+        binary, and they all pass here, but provider-backed signing was measured \
+        on macOS 26.6.2 to fail in this state with "device not found" — CTK \
+        identities still list, they just cannot sign. Log in at the console; the \
+        screen may then be locked.
+        """
+    }
     if report.platform.verifiedRelease != true {
         lines += """
         \n

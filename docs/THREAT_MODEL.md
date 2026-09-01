@@ -57,6 +57,21 @@ macOS 26 and later, which is the range with physical evidence. `doctor` reports
 because reports about Sequoia conflict and a refusal would be as unfounded as a
 silent pass. Anything run below that line carries no evidence from this project.
 
+## Operational constraint
+
+Provider-backed signing requires a console session. Measured on macOS 26.6.2:
+with the account logged in, signing and SSH authentication work from an SSH
+session whether the screen is unlocked or locked; once logged out they fail with
+`device not found`, even though `sc_auth` still enumerates the identity and
+OpenSSH still gets the public key accepted by the server.
+
+`sc_auth create-ctk-identity` is worse in that state: it exits 0 and creates
+nothing.
+
+An unattended Mac therefore has to stay logged in. That is a real exposure to
+weigh against `-t none` itself: a logged-in console session plus `-t none` means
+any process running as that user can request signatures with no approval.
+
 ## Unverified behaviors
 
 The `p-256-ne + none` canary covers creation, multiple identity-file selection,

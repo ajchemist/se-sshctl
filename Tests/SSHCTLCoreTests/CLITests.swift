@@ -64,6 +64,53 @@ import Testing
     #expect(output.contains("/usr/sbin/sc_auth"))
 }
 
+@Test func doctorWarnsWhenNobodyIsLoggedInAtTheConsole() throws {
+    // Measured on macOS 26.6.2: a logged-out Mac still enumerates its CTK
+    // identities but cannot sign — "device not found". Every binary check
+    // below passes in that state, so without this the report is an all-clear
+    // in exactly the situation that needs a warning.
+    let executor = FakeSubprocessExecutor(results: healthyDoctorResults())
+
+    let output = try CLI.run(
+        arguments: ["doctor"],
+        executor: executor,
+        pathExists: { _ in true },
+        consoleUser: { nil }
+    )
+
+    #expect(output.contains("console session: none"))
+    #expect(output.contains("warning:"))
+    #expect(output.contains("device not found"))
+    // The binary checks still report what they found; nothing is suppressed.
+    #expect(output.contains("signature:  valid"))
+    #expect(output.contains("anchor:     apple"))
+}
+
+@Test func doctorNamesTheConsoleSessionWhenThereIsOne() throws {
+    let executor = FakeSubprocessExecutor(results: healthyDoctorResults())
+
+    let output = try CLI.run(
+        arguments: ["doctor"],
+        executor: executor,
+        pathExists: { _ in true },
+        consoleUser: { "operator" }
+    )
+
+    #expect(output.contains("console session: operator"))
+    #expect(!output.contains("warning:"))
+}
+
+private func healthyDoctorResults() -> [Result<SubprocessResult, Error>] {
+    [
+        .success(cliResult(stdout: "26.6.2\n")),
+        .success(cliResult(stdout: "25G83\n")),
+        .success(cliResult(stdout: "arm64\n")),
+        .success(cliResult(stderr: "OpenSSH_10.3p1\n")),
+        .success(cliResult()),
+        .success(cliResult(stderr: "designated => identifier \"com.apple.ssh-keychain\" and anchor apple\n")),
+    ]
+}
+
 @Test func doctorWarnsBelowTheVerifiedMacOSReleaseWithoutBlocking() throws {
     // Public reports conflict about whether Sequoia works, so this warns
     // rather than refusing: blocking would deny setups that may be fine, and

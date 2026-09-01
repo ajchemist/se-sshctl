@@ -69,7 +69,10 @@ assumed a report implies success do not — check `status` explicitly.
 ### Changed: `doctor` JSON is `schemaVersion` 2
 
 `platform` gains `verifiedRelease` (`true`, `false`, or `null` when the version
-string could not be read as a number) and `minimumVerifiedRelease`.
+string could not be read as a number) and `minimumVerifiedRelease`. The report
+gains `consoleSession`, the account logged in at the console or `null` at the
+login window, because provider-backed signing was measured to fail without one
+while every other check still passes.
 
 The human output also changed shape: `provider: verified|unverified` collapsed
 signature validity and Apple anchoring into one word and omitted the path and

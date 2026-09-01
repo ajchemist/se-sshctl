@@ -318,10 +318,20 @@ observe to that record. Each creates a throwaway identity and deletes it again:
   unrelated CA, so OpenSSH is not tolerating an expired certificate; it does not
   consult the certificate here at all. `Valid=NO` is not a signal that a key
   stopped working, and never a reason to delete it.
-- **`-t none` works from an SSH session with the console locked.** Both local
-  signing and a real public-key SSH authentication succeeded on a Mac Studio
-  (M1 Ultra, macOS 26.6.2) while it was locked. Logged-out and
-  reboot-before-first-unlock are still unmeasured.
+- **`-t none` needs a console session, but it may be locked.** From an SSH
+  session, signing and a real public-key SSH authentication both succeed while
+  the console is logged in — unlocked or locked. Once the account is **logged
+  out of the GUI they both fail**: the identity still lists, and OpenSSH still
+  offers the key and has it accepted, but the provider cannot reach the enclave
+  and reports `device not found`.
+
+  This is the tool's central operational constraint. The remote-Mac workflow
+  `-t none` exists for works, provided somebody stays logged in at the console.
+  Locking the screen is fine. Logging out is not.
+
+  `doctor` reports the console session for this reason: every other check it
+  makes inspects a binary, and all of them pass on a logged-out Mac where
+  nothing can sign.
 
 Full records, including what each run did not cover, are in
 [`docs/HARDWARE_VERIFICATION.md`](docs/HARDWARE_VERIFICATION.md).

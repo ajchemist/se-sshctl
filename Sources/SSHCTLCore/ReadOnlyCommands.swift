@@ -54,6 +54,22 @@ public struct DoctorReport: Codable, Equatable, Sendable {
     public let scAuth: ToolReport
     public let openSSH: ToolReport
     public let provider: ProviderReport
+    /// The account logged in at the console, or nil at the login window.
+    ///
+    /// Every other check here inspects a binary, and all of them pass on a
+    /// machine where signing cannot work at all: measured on macOS 26.6.2, a
+    /// logged-out Mac still enumerates its CTK identities but fails to sign
+    /// with "device not found". Without this field `doctor` reports an
+    /// all-clear in exactly the situation an operator most needs the warning.
+    public let consoleSession: String?
+}
+
+/// Reads the console session from `/dev/console` ownership, which macOS leaves
+/// with root at the login window and assigns to the user on login.
+public func currentConsoleUser(fileManager: FileManager = .default) -> String? {
+    let attributes = try? fileManager.attributesOfItem(atPath: "/dev/console")
+    guard let owner = attributes?[.ownerAccountName] as? String, owner != "root" else { return nil }
+    return owner
 }
 
 public struct ProviderInspector {
@@ -97,13 +113,16 @@ public struct ProviderInspector {
 public struct Doctor {
     private let executor: any SubprocessExecuting
     private let pathExists: (String) -> Bool
+    private let consoleUser: () -> String?
 
     public init(
         executor: any SubprocessExecuting,
-        pathExists: @escaping (String) -> Bool = FileManager.default.fileExists(atPath:)
+        pathExists: @escaping (String) -> Bool = FileManager.default.fileExists(atPath:),
+        consoleUser: @escaping () -> String? = { currentConsoleUser() }
     ) {
         self.executor = executor
         self.pathExists = pathExists
+        self.consoleUser = consoleUser
     }
 
     public func report() throws -> DoctorReport {
@@ -120,7 +139,8 @@ public struct Doctor {
                 available: pathExists(SystemExecutable.ssh.path),
                 version: sshVersion
             ),
-            provider: try ProviderInspector(executor: executor, pathExists: pathExists).report()
+            provider: try ProviderInspector(executor: executor, pathExists: pathExists).report(),
+            consoleSession: consoleUser()
         )
     }
 
