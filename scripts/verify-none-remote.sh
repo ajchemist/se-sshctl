@@ -127,7 +127,9 @@ WHAT EACH RUN ACTUALLY DOES
   network SSH target with its own server policy, and the '-t bio' path, which
   is scripts/verify-bio.sh.
 
-Run this over SSH, once per context, in this order:
+Run this over SSH, once per context, IN THIS ORDER. The first context creates
+the test identity; every later one reuses it and will refuse to create one, so
+that a setup failure in a degraded context is never mistaken for a measurement:
 
   unlocked          a normal SSH session while the GUI session is unlocked
   locked            lock the console (Ctrl-Cmd-Q), then reconnect and run
@@ -202,6 +204,11 @@ if [[ "$CONTEXT" == "report" ]]; then
       local_var="LOCAL_${context//-/_}"
       remote_var="REMOTE_${context//-/_}"
       printf '| %s | %s | %s |\n' "$context" "${!local_var:-not-run}" "${!remote_var:-not-run}"
+    done
+    for context in unlocked locked logged-out pre-first-unlock; do
+      detail_var="DETAIL_${context//-/_}"
+      [[ -n "${!detail_var:-}" ]] || continue
+      printf '\n%s: %s\n' "$context" "${!detail_var}"
     done
     # shellcheck disable=SC2016  # the backticks are markdown, not a subshell
     printf '\nEach row is one SSH session into this Mac. "local signing" is\n'
@@ -289,6 +296,18 @@ stage "Reuse or create the test identity"
 if [[ -n "${CTK_SHA256:-}" ]] && "$SSHCTL" identity list --json | /usr/bin/grep -qi -- "$CTK_SHA256"; then
   say "Reusing the identity created by an earlier context."
 else
+  # Creation is setup, not measurement, and it only happens in the baseline
+  # context. Creating in a degraded context confuses a setup failure with a
+  # result: if sc_auth cannot create or cannot enumerate while logged out,
+  # that says nothing about whether an existing key can still sign.
+  if [[ "$CONTEXT" != "unlocked" ]]; then
+    warn "no test identity exists yet on this Mac"
+    warn "run the baseline first, with the GUI session logged in and unlocked:"
+    printf '    %q unlocked\n' "${BASH_SOURCE[0]}"
+    warn "then return to '$CONTEXT'. Contexts after the baseline reuse that identity"
+    warn "and never create one, so a creation failure cannot be mistaken for a result."
+    exit 1
+  fi
   warn "A persistent p-256-ne + none identity named $LABEL will be created."
   warn "-t none removes per-use approval: any process running as you can request"
   warn "signatures from it. That is exactly the property being measured."
@@ -316,22 +335,28 @@ fi
 CURRENT_STAGE=measure
 stage "Sign and authenticate from this session"
 say "Neither command may show a GUI prompt. If one appears, that is the finding."
+DETAIL=""
 LOCAL_RESULT=failed
 if "$SSHCTL" verify local --ctk-sha256 "$CTK_SHA256" --identity-file "$IDENTITY_FILE" --json > "$STATE_DIR/local.json" 2>"$STATE_DIR/local.err"; then
   LOCAL_RESULT=passed
 else
   warn "local signing failed in the '$CONTEXT' context — recording it"
-  note "$(/usr/bin/tail -n 3 "$STATE_DIR/local.err")"
+  # "the enclave refused to sign" and "sc_auth could not even enumerate the
+  # identity" are different findings, and only the reason distinguishes them.
+  DETAIL=$(/usr/bin/tail -n 1 "$STATE_DIR/local.err")
+  note "$DETAIL"
 fi
 REMOTE_RESULT=failed
 if "$SSHCTL" verify remote --ctk-sha256 "$CTK_SHA256" --identity-file "$IDENTITY_FILE" --target "$USER@localhost" --json > "$STATE_DIR/remote.json" 2>"$STATE_DIR/remote.err"; then
   REMOTE_RESULT=passed
 else
   warn "localhost authentication failed in the '$CONTEXT' context — recording it"
-  note "$(/usr/bin/tail -n 3 "$STATE_DIR/remote.err")"
+  [[ -n "$DETAIL" ]] || DETAIL=$(/usr/bin/tail -n 1 "$STATE_DIR/remote.err")
+  note "$(/usr/bin/tail -n 1 "$STATE_DIR/remote.err")"
 fi
 save_state "LOCAL_${CONTEXT//-/_}" "$LOCAL_RESULT"
 save_state "REMOTE_${CONTEXT//-/_}" "$REMOTE_RESULT"
+save_state "DETAIL_${CONTEXT//-/_}" "$DETAIL"
 
 CURRENT_STAGE=summary
 stage "Result for '$CONTEXT'"
