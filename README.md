@@ -199,7 +199,21 @@ the cleanup path when an identity file is removed directly or a CTK identity is
 deleted with `sc_auth`; it never touches identity files or CTK identities
 itself.
 
-## Supported macOS
+## Requirements
+
+### Server
+
+The identity is an OpenSSH security key of type
+`sk-ecdsa-sha2-nistp256@openssh.com`, so the server must accept that key type:
+OpenSSH 8.2 or later, with `sk-ecdsa-sha2-nistp256@openssh.com` present in
+`PubkeyAcceptedAlgorithms`. A server that restricts that list, or an older
+sshd, refuses the key regardless of anything on this Mac. `verify remote`
+captures the client log, which is where such a refusal shows up.
+
+Nothing on the server side has been tested beyond a default-policy localhost
+run; see the hardware boundary below.
+
+### Client
 
 macOS 26 (Tahoe) and later. That is where this project has physical evidence:
 `docs/HARDWARE_VERIFICATION.md` records macOS 26.6.x, and nothing older has been
