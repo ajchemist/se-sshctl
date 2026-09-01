@@ -244,6 +244,8 @@ import Testing
     #expect(report.checks.remoteAuthentication == .passed)
     #expect(report.checks.localSigning == .notRun)
     let ssh = executor.requests.first { $0.executable == .ssh }!
+    #expect(ssh.arguments.contains("-v"))
+    #expect(report.clientLog?.contains("Authenticated to") == true)
     #expect(ssh.arguments.contains("BatchMode=yes"))
     #expect(ssh.arguments.contains("IdentitiesOnly=yes"))
     #expect(ssh.arguments.contains("none"))
@@ -283,6 +285,7 @@ import Testing
     #expect(report.checks.localSigning == .notRun)
     #expect(report.target == "deploy@example.test")
     #expect(report.detail?.contains("Permission denied") == true)
+    #expect(report.clientLog?.contains("Permission denied") == true)
 }
 
 @Test func untrustedProviderFailsThatCheckAndLeavesTheRestNotRun() throws {
@@ -308,6 +311,32 @@ import Testing
     #expect(!executor.requests.contains { $0.arguments.prefix(2) == ["-Y", "sign"] })
 }
 
+@Test func remoteClientLogIsBoundedAndKeepsTheAuthenticationOutcome() throws {
+    // A chatty or hostile server must not make the report unbounded, and the
+    // tail is where the authentication result is.
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
+    try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
+    let executor = OperationalExecutor(remoteAuthenticationFails: true, clientLogLineCount: 500)
+
+    let failure = #expect(throws: VerificationFailed.self) {
+        try RemoteVerifier(executor: executor).verify(
+            ctkSHA256: hash, identityFile: identityFile.path, target: "deploy@example.test"
+        )
+    }
+
+    let clientLog = try #require(failure?.report.clientLog)
+    let lines = clientLog.split(whereSeparator: \Character.isNewline)
+    #expect(lines.count == 101)
+    #expect(lines.first?.contains("400 earlier lines omitted") == true)
+    #expect(clientLog.contains("Permission denied"))
+}
+
 private final class OperationalExecutor: SubprocessExecuting {
     private(set) var requests: [SubprocessRequest] = []
     private let duplicateMetadata: Bool
@@ -320,6 +349,7 @@ private final class OperationalExecutor: SubprocessExecuting {
     private let matchingDownloadAttempt: Int
     private let remoteAuthenticationFails: Bool
     private let providerSignatureInvalid: Bool
+    private let clientLogLineCount: Int
     private var downloadAttempt = 0
 
     init(
@@ -332,10 +362,12 @@ private final class OperationalExecutor: SubprocessExecuting {
         identityCount: Int = 1,
         matchingDownloadAttempt: Int = 1,
         remoteAuthenticationFails: Bool = false,
-        providerSignatureInvalid: Bool = false
+        providerSignatureInvalid: Bool = false,
+        clientLogLineCount: Int = 1
     ) {
         self.remoteAuthenticationFails = remoteAuthenticationFails
         self.providerSignatureInvalid = providerSignatureInvalid
+        self.clientLogLineCount = clientLogLineCount
         self.duplicateMetadata = duplicateMetadata
         self.racingDestination = racingDestination
         self.protection = protection
@@ -356,8 +388,19 @@ private final class OperationalExecutor: SubprocessExecuting {
                 ? operationalResult(stderr: "code object is not signed at all\n", exitStatus: 1)
                 : operationalResult()
         }
+        if request.executable == .ssh, !remoteAuthenticationFails {
+            return operationalResult(stderr: """
+            debug1: Offering public key: \(sshFingerprint) ECDSA-SK
+            debug1: Server accepts key: \(sshFingerprint) ECDSA-SK
+            debug1: Authenticated to example.test using "publickey".
+            """)
+        }
         if request.executable == .ssh, remoteAuthenticationFails {
-            return operationalResult(stderr: "Permission denied (publickey).\n", exitStatus: 255)
+            let chatter = (1..<clientLogLineCount).map { "debug1: line \($0)" }
+            return operationalResult(
+                stderr: (chatter + ["Permission denied (publickey)."]).joined(separator: "\n") + "\n",
+                exitStatus: 255
+            )
         }
         if request.executable == .scAuth {
             let typeIndex = request.arguments.firstIndex(of: "-t")!

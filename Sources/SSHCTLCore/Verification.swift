@@ -37,6 +37,10 @@ public struct VerificationReport: Encodable, Equatable, Sendable {
     public let target: String?
     public let checks: VerificationChecks
     public let detail: String?
+    /// OpenSSH client verbose output from `verify remote`, on both pass and
+    /// fail. Server authentication logs are not here: reading them needs
+    /// privileged access on the target, which is outside this tool's boundary.
+    public let clientLog: String?
 
     init(
         status: VerificationOutcome,
@@ -44,7 +48,8 @@ public struct VerificationReport: Encodable, Equatable, Sendable {
         ctkSHA256: String,
         target: String?,
         checks: VerificationChecks,
-        detail: String? = nil
+        detail: String? = nil,
+        clientLog: String? = nil
     ) {
         self.status = status
         self.kind = kind
@@ -52,6 +57,7 @@ public struct VerificationReport: Encodable, Equatable, Sendable {
         self.target = target
         self.checks = checks
         self.detail = detail
+        self.clientLog = clientLog
     }
 }
 
@@ -76,7 +82,8 @@ private func failure(
     kind: String,
     ctkSHA256: String,
     target: String?,
-    checks: VerificationChecks
+    checks: VerificationChecks,
+    clientLog: String? = nil
 ) -> VerificationFailed {
     VerificationFailed(
         report: VerificationReport(
@@ -85,10 +92,23 @@ private func failure(
             ctkSHA256: ctkSHA256,
             target: target,
             checks: checks,
-            detail: (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            detail: (error as? LocalizedError)?.errorDescription ?? String(describing: error),
+            clientLog: clientLog
         ),
         underlying: error
     )
+}
+
+/// Keeps the tail of the client log, which is where the authentication
+/// outcome is, and bounds it so a chatty or hostile server cannot make the
+/// report unbounded.
+private func boundedClientLog(_ stderr: String) -> String? {
+    let lines = stderr.split(whereSeparator: \Character.isNewline)
+    guard !lines.isEmpty else { return nil }
+    let limit = 100
+    guard lines.count > limit else { return lines.joined(separator: "\n") }
+    return (["[\(lines.count - limit) earlier lines omitted]"]
+        + lines.suffix(limit)).joined(separator: "\n")
 }
 
 public struct LocalVerifier {
@@ -190,6 +210,7 @@ public struct RemoteVerifier {
 
     public func verify(ctkSHA256 hash: String, identityFile: String, target: String) throws -> VerificationReport {
         var checks = VerificationChecks()
+        var clientLog: String?
         do {
             guard !target.isEmpty, !target.hasPrefix("-"),
                   !target.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains) else {
@@ -203,12 +224,16 @@ public struct RemoteVerifier {
                 checks: &checks
             )
             do {
-                try requireOperationalSuccess(executor.run(SubprocessRequest(
+                let result = try executor.run(SubprocessRequest(
                     executable: .ssh,
                     arguments: isolatedSSHArguments(identityFile: identityFile, target: target),
                     environment: providerEnvironment(ctkSHA1Hash: preflight.resolved.ctkSHA1Hash),
                     timeout: 30
-                )))
+                ))
+                // Captured before the success check: a failed authentication is
+                // exactly when the log is worth having.
+                clientLog = boundedClientLog(result.stderr)
+                try requireOperationalSuccess(result)
                 checks.remoteAuthentication = .passed
             } catch {
                 checks.remoteAuthentication = .failed
@@ -219,11 +244,17 @@ public struct RemoteVerifier {
                 kind: "remote",
                 ctkSHA256: preflight.normalizedHash,
                 target: target,
-                checks: checks
+                checks: checks,
+                clientLog: clientLog
             )
         } catch {
             throw failure(
-                error, kind: "remote", ctkSHA256: hash.uppercased(), target: target, checks: checks
+                error,
+                kind: "remote",
+                ctkSHA256: hash.uppercased(),
+                target: target,
+                checks: checks,
+                clientLog: clientLog
             )
         }
     }
@@ -234,6 +265,9 @@ public struct RemoteVerifier {
 /// user config, no multiplexed connection, no password fallback.
 private func isolatedSSHArguments(identityFile: String, target: String) -> [String] {
     [
+        // -v records the authentication method progression, which is the only
+        // client-side evidence of why a public-key attempt was refused.
+        "-v",
         "-F", "none",
         "-S", "none",
         "-o", "BatchMode=yes",

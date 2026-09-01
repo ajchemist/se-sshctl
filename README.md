@@ -144,6 +144,14 @@ or the environment.
 `identity list` prints identity metadata for the current user. Share this output
 only when you intend to disclose its labels and hashes.
 
+`verify local` and `verify remote` report `providerLoad`, `localSigning`, and
+`remoteAuthentication` as `passed`, `failed`, or `not-run`. A check a command
+does not attempt is reported as `not-run` rather than omitted, so an untested
+check is never read as a passing one. A failed run prints the same manifest and
+exits non-zero. `verify remote` runs the client verbosely and carries that log
+into the report; server authentication logs need privileged access on the target
+and are not collected.
+
 The CLI manages local CTK identities and verifies SSH access. It emits public-key
 metadata for external tools, but it does not manage remote automation or
 authorization.

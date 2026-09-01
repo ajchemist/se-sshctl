@@ -235,6 +235,12 @@ private func human(_ report: VerificationReport) -> String {
         "  remote authentication: \(report.checks.remoteAuthentication.rawValue)",
     ]
     if let detail = report.detail { lines.append("  detail: \(detail)") }
+    // The client log is diagnostic noise on a pass; on a failure it is the
+    // reason. JSON always carries it, text prints it only when it is needed.
+    if report.status != .passed, let clientLog = report.clientLog {
+        lines.append("  client log:")
+        lines.append(contentsOf: clientLog.split(whereSeparator: \Character.isNewline).map { "    \($0)" })
+    }
     return lines.joined(separator: "\n")
 }
 
@@ -408,6 +414,11 @@ It does not install or revoke remote authorized_keys entries.
 Every run reports providerLoad, localSigning, and remoteAuthentication as passed, failed, or
 not-run; localSigning is always not-run here. A failed run still prints the manifest and exits
 non-zero.
+
+The client runs verbosely and its log is captured into the report on both pass and fail.
+--json always carries it; text output prints it only on failure. Server authentication logs
+are not collected: reading them requires privileged access on the target, which is outside
+this tool's boundary. Check the server's own sshd log when the client log is not enough.
 
 OPTIONS
   --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
