@@ -50,14 +50,12 @@ public struct ProviderInspector {
         let verification = available
             ? try executor.run(SubprocessRequest(executable: .codesign, arguments: ["--verify", "--strict", path]))
             : nil
-        let signatureValid = verification.map {
-            !$0.timedOut && $0.terminationReason == .exit && $0.exitStatus == 0
-        } ?? false
+        let signatureValid = verification?.succeeded ?? false
         let requirementResult = available
             ? try executor.run(SubprocessRequest(executable: .codesign, arguments: ["-dr", "-", path]))
             : nil
         let requirement = requirementResult.flatMap {
-            guard !$0.timedOut, $0.terminationReason == .exit, $0.exitStatus == 0 else { return nil }
+            guard $0.succeeded else { return nil }
             return ($0.stdout.isEmpty ? $0.stderr : $0.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
         } ?? ""
         return ProviderReport(
@@ -104,7 +102,7 @@ public struct Doctor {
 
     private func successfulOutput(_ request: SubprocessRequest) throws -> String {
         let result = try executor.run(request)
-        guard !result.timedOut, result.terminationReason == .exit, result.exitStatus == 0 else {
+        guard result.succeeded else {
             throw ReadOnlyCommandError.commandFailed(request.executable)
         }
         let output = result.stdout.isEmpty ? result.stderr : result.stdout
@@ -152,7 +150,7 @@ public struct IdentityLister {
             arguments: ["list-ctk-identities", "-t", hashType.rawValue, "-e", hashEncoding.rawValue]
         )
         let result = try executor.run(request)
-        guard !result.timedOut, result.terminationReason == .exit, result.exitStatus == 0 else {
+        guard result.succeeded else {
             throw ReadOnlyCommandError.commandFailed(.scAuth)
         }
         return IdentityListReport(

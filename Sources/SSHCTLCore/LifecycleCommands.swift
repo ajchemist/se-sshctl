@@ -121,7 +121,7 @@ private func validateLabel(_ label: String) throws {
 }
 
 private func requireSuccess(_ result: SubprocessResult) throws {
-    guard !result.timedOut, result.terminationReason == .exit, result.exitStatus == 0 else {
+    guard result.succeeded else {
         let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         throw IdentityLifecycleError.commandFailed(detail)
     }

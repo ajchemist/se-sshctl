@@ -62,6 +62,13 @@ public struct SubprocessResult: Equatable, Sendable {
         self.terminationReason = terminationReason
         self.timedOut = timedOut
     }
+
+    /// The single definition of a successful run: it finished on its own,
+    /// exited rather than being signalled, and reported status 0. Callers
+    /// distinguish the failure kinds through `timedOut` and `stderr`.
+    public var succeeded: Bool {
+        !timedOut && terminationReason == .exit && exitStatus == 0
+    }
 }
 
 public protocol SubprocessExecuting {

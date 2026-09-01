@@ -443,7 +443,7 @@ private func validatedPublicKey(at url: URL) throws -> String {
 }
 
 private func requireOperationalSuccess(_ result: SubprocessResult) throws {
-    guard !result.timedOut, result.terminationReason == .exit, result.exitStatus == 0 else {
+    guard result.succeeded else {
         if result.timedOut { throw OperationalCommandError.commandFailed("timed out") }
         let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         throw OperationalCommandError.commandFailed(detail)
