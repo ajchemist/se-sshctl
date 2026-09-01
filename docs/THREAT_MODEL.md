@@ -50,6 +50,13 @@ Enclave provenance attestation is claimed.
 | Wrong-key identity file installation | Separate SHA-256/SHA-1/SSH identifiers; isolated overwrite-position downloads plus fingerprint matching; ambiguous metadata is rejected | Large or mixed-token inventories need more physical-Mac coverage |
 | Accidental identity deletion | The CLI has no deletion command; removal requires Apple's own `sc_auth delete-ctk-identity` | An operator running `sc_auth` directly gets none of this tool's selection or confirmation checks |
 
+## Supported platform
+
+macOS 26 and later, which is the range with physical evidence. `doctor` reports
+`platform.verifiedRelease` and warns on older releases without blocking them,
+because reports about Sequoia conflict and a refusal would be as unfounded as a
+silent pass. Anything run below that line carries no evidence from this project.
+
 ## Unverified behaviors
 
 The `p-256-ne + none` canary covers creation, multiple identity-file selection,

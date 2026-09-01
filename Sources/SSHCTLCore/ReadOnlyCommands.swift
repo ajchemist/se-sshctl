@@ -4,10 +4,34 @@ public enum ReadOnlyCommandError: Error, Equatable {
     case commandFailed(SystemExecutable)
 }
 
+/// The oldest macOS this project has physical evidence for.
+///
+/// Below it `doctor` warns but nothing is blocked. Public reports conflict
+/// about whether Sequoia works at all (see docs/SECURE_ENCLAVE_SSH_RESEARCH.md
+/// and Beads se-sshctl-8c1), so refusing to run would deny setups that may be
+/// perfectly fine, while saying nothing leaves an operator to debug a failure
+/// whose cause is simply an untested OS.
+public let minimumVerifiedMacOSMajorVersion = 26
+
 public struct PlatformReport: Codable, Equatable, Sendable {
     public let version: String
     public let build: String
     public let architecture: String
+    /// Whether `version` is at or above the verified minimum. `nil` when the
+    /// version string could not be read as a number, which is itself worth
+    /// surfacing rather than silently treating as supported.
+    public let verifiedRelease: Bool?
+    public let minimumVerifiedRelease: String
+
+    public init(version: String, build: String, architecture: String) {
+        self.version = version
+        self.build = build
+        self.architecture = architecture
+        self.verifiedRelease = version.split(separator: ".").first
+            .flatMap { Int($0) }
+            .map { $0 >= minimumVerifiedMacOSMajorVersion }
+        self.minimumVerifiedRelease = "\(minimumVerifiedMacOSMajorVersion)"
+    }
 }
 
 public struct ToolReport: Codable, Equatable, Sendable {
@@ -88,7 +112,7 @@ public struct Doctor {
         let architecture = try successfulOutput(SubprocessRequest(executable: .uname, arguments: ["-m"]))
         let sshVersion = try successfulOutput(SubprocessRequest(executable: .ssh, arguments: ["-V"]))
         return DoctorReport(
-            schemaVersion: 1,
+            schemaVersion: 2,
             platform: PlatformReport(version: version, build: build, architecture: architecture),
             scAuth: ToolReport(path: SystemExecutable.scAuth.path, available: pathExists(SystemExecutable.scAuth.path), version: nil),
             openSSH: ToolReport(

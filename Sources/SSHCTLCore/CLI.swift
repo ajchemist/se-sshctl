@@ -245,7 +245,7 @@ private func human(_ report: DoctorReport) -> String {
     // docs/THREAT_MODEL.md requires path, signature validity, identifier, and
     // Apple anchor evidence to stay separately readable, so a provider that is
     // signed but not Apple-anchored cannot be confused with a trusted one.
-    """
+    var lines = """
     macOS \(report.platform.version) (\(report.platform.build)) \(report.platform.architecture)
     OpenSSH: \(report.openSSH.version ?? "unknown") (\(report.openSSH.path))
     sc_auth: \(report.scAuth.available ? "available" : "missing") (\(report.scAuth.path))
@@ -255,6 +255,17 @@ private func human(_ report: DoctorReport) -> String {
       anchor:     \(report.provider.appleAnchored ? "apple" : "not apple")
       identifier: \(report.provider.identifier ?? "unknown")
     """
+    if report.platform.verifiedRelease != true {
+        lines += """
+        \n
+        warning: se-sshctl has physical evidence only for macOS \
+        \(report.platform.minimumVerifiedRelease) and later. On \
+        \(report.platform.version), identity creation, identity-file download, or \
+        provider-backed signing may fail in ways this tool cannot explain. \
+        Nothing is blocked; reports about older releases conflict.
+        """
+    }
+    return lines
 }
 
 private func human(_ report: IdentityListReport) -> String {

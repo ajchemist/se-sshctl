@@ -18,7 +18,7 @@ import Testing
         pathExists: { _ in true }
     )
 
-    #expect(output.contains(#""schemaVersion":1"#))
+    #expect(output.contains(#""schemaVersion":2"#))
     #expect(output.contains(#""appleAnchored":true"#))
 }
 
@@ -62,6 +62,49 @@ import Testing
     #expect(output.contains("anchor:     apple"))
     #expect(output.contains("identifier: com.apple.ssh-keychain"))
     #expect(output.contains("/usr/sbin/sc_auth"))
+}
+
+@Test func doctorWarnsBelowTheVerifiedMacOSReleaseWithoutBlocking() throws {
+    // Public reports conflict about whether Sequoia works, so this warns
+    // rather than refusing: blocking would deny setups that may be fine, and
+    // silence leaves the operator debugging an untested OS.
+    let executor = FakeSubprocessExecutor(results: [
+        .success(cliResult(stdout: "15.6\n")),
+        .success(cliResult(stdout: "24G84\n")),
+        .success(cliResult(stdout: "arm64\n")),
+        .success(cliResult(stderr: "OpenSSH_9.9p2\n")),
+        .success(cliResult()),
+        .success(cliResult(stderr: "designated => identifier \"com.apple.ssh-keychain\" and anchor apple\n")),
+    ])
+
+    let output = try CLI.run(arguments: ["doctor"], executor: executor, pathExists: { _ in true })
+
+    #expect(output.contains("warning:"))
+    #expect(output.contains("macOS 26 and later"))
+    #expect(output.contains("Nothing is blocked"))
+    // The provider evidence is still reported in full.
+    #expect(output.contains("identifier: com.apple.ssh-keychain"))
+}
+
+@Test func doctorIsSilentAboutTheReleaseWhenItIsVerified() throws {
+    let executor = FakeSubprocessExecutor(results: [
+        .success(cliResult(stdout: "26.6.2\n")),
+        .success(cliResult(stdout: "25G83\n")),
+        .success(cliResult(stdout: "arm64\n")),
+        .success(cliResult(stderr: "OpenSSH_10.3p1\n")),
+        .success(cliResult()),
+        .success(cliResult(stderr: "designated => identifier \"com.apple.ssh-keychain\" and anchor apple\n")),
+    ])
+
+    let output = try CLI.run(arguments: ["doctor"], executor: executor, pathExists: { _ in true })
+
+    #expect(!output.contains("warning:"))
+}
+
+@Test func anUnreadableReleaseNumberIsNotTreatedAsVerified() {
+    let platform = PlatformReport(version: "beta", build: "25G83", architecture: "arm64")
+
+    #expect(platform.verifiedRelease == nil)
 }
 
 @Test func cliHelpDocumentsTheCompleteLocalLifecycleWithoutRunningCommands() throws {

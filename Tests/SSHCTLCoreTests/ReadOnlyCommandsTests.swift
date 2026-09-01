@@ -18,7 +18,9 @@ import Testing
 
     let report = try doctor.report()
 
-    #expect(report.schemaVersion == 1)
+    #expect(report.schemaVersion == 2)
+    #expect(report.platform.verifiedRelease == true)
+    #expect(report.platform.minimumVerifiedRelease == "26")
     #expect(report.platform.version == "26.6.1")
     #expect(report.platform.build == "25G76")
     #expect(report.platform.architecture == "arm64")

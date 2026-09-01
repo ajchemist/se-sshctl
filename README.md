@@ -168,6 +168,18 @@ The CLI manages local CTK identities and verifies SSH access. It emits public-ke
 metadata for external tools, but it does not manage remote automation or
 authorization.
 
+## Supported macOS
+
+macOS 26 (Tahoe) and later. That is where this project has physical evidence:
+`docs/HARDWARE_VERIFICATION.md` records macOS 26.6.x, and nothing older has been
+tested by anyone here.
+
+Older releases are not blocked. Public reports disagree about whether the
+`sc_auth` Secure Enclave path works on Sequoia at all, so refusing to run would
+deny setups that may be fine. Instead `doctor` says plainly that the release is
+below the verified minimum, so an unexplained failure during creation, download,
+or signing has an obvious first suspect.
+
 ## CI and hardware boundary
 
 GitHub Actions builds the project, runs all tests and fixtures, and performs
