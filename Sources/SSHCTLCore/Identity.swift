@@ -1,9 +1,40 @@
 import Foundation
 
+/// The native `sc_auth -k` key types. Encodes as its raw sc_auth value.
+public enum CTKKeyType: String, Codable, Sendable, CaseIterable {
+    case p256 = "p-256"
+    case p384 = "p-384"
+    case p521 = "p-521"
+    case p256NonExportable = "p-256-ne"
+    case p384NonExportable = "p-384-ne"
+
+    /// Only the non-exportable P-256 identity is usable through Apple's
+    /// OpenSSH security-key provider.
+    public var isOpenSSHCompatible: Bool { self == .p256NonExportable }
+}
+
+/// The native `sc_auth -t` per-use authorization value. Encodes as its raw
+/// sc_auth value.
+///
+/// `none` removes the user-presence gate rather than replacing it with a
+/// password or PIN: any process running as the user can request signatures.
+public enum CTKProtection: String, Codable, Sendable, CaseIterable {
+    case bio
+    case none
+
+    /// `sc_auth create-ctk-identity` blocks on a Touch ID prompt under `bio`,
+    /// so it needs the operator's reaction time, not just Apple's.
+    public var creationTimeout: TimeInterval { self == .bio ? 120 : 30 }
+
+    /// Apple's provider prompts for a PIN on the `none` path only; `bio`
+    /// authorizes through Touch ID and takes an empty reply.
+    public var providerPIN: Data { self == .bio ? Data() : Data("0".utf8) }
+}
+
 public struct CTKIdentity: Codable, Equatable, Sendable {
-    public let keyType: String
+    public let keyType: CTKKeyType
     public let ctkPublicKeyHash: String
-    public let protection: String
+    public let protection: CTKProtection
     public let label: String
     public let commonName: String
     public let emailAddress: String
@@ -52,18 +83,18 @@ public struct CTKIdentityParser {
         return try lines.dropFirst().enumerated().map { offset, line in
             let values = try fields(in: line, starts: starts, lineNumber: offset + 2)
             guard
-                ["p-256", "p-384", "p-521", "p-256-ne", "p-384-ne"].contains(values[0]),
+                let keyType = CTKKeyType(rawValue: values[0]),
                 validHash(values[1]),
-                ["bio", "none"].contains(values[2]),
+                let protection = CTKProtection(rawValue: values[2]),
                 !values[3].isEmpty,
                 !values[6].isEmpty,
                 ["YES", "NO"].contains(values[7])
             else { throw CTKIdentityParseError.malformedRow(offset + 2) }
 
             return CTKIdentity(
-                keyType: values[0],
+                keyType: keyType,
                 ctkPublicKeyHash: values[1],
-                protection: values[2],
+                protection: protection,
                 label: values[3],
                 commonName: values[4],
                 emailAddress: values[5],

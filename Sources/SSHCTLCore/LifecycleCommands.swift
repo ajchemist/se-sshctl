@@ -60,9 +60,15 @@ public struct IdentityCreator {
         allowUnattendedSigning: Bool
     ) throws -> IdentityCreateReport {
         try validateLabel(label)
-        guard keyType == "p-256-ne" else { throw IdentityLifecycleError.unsupportedKeyType }
-        guard ["bio", "none"].contains(protection) else { throw IdentityLifecycleError.invalidProtection }
-        guard protection != "none" || allowUnattendedSigning else {
+        // sc_auth values arrive as argv strings; decode them once here so the
+        // rest of the flow reasons about the concept, not the spelling.
+        guard let keyType = CTKKeyType(rawValue: keyType), keyType.isOpenSSHCompatible else {
+            throw IdentityLifecycleError.unsupportedKeyType
+        }
+        guard let protection = CTKProtection(rawValue: protection) else {
+            throw IdentityLifecycleError.invalidProtection
+        }
+        guard protection != .none || allowUnattendedSigning else {
             throw IdentityLifecycleError.unattendedSigningNotAcknowledged
         }
 
@@ -73,9 +79,9 @@ public struct IdentityCreator {
             executable: .scAuth,
             arguments: [
                 "create-ctk-identity", "-l", label,
-                "-k", keyType, "-t", protection,
+                "-k", keyType.rawValue, "-t", protection.rawValue,
             ],
-            timeout: protection == "bio" ? 120 : 30
+            timeout: protection.creationTimeout
         )))
         let after = try IdentityLister(executor: executor).list().identities
         let oldHashes = Set(before.map { $0.ctkPublicKeyHash.uppercased() })

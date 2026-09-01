@@ -367,7 +367,7 @@ private struct ResolvedIdentity {
     let providerHash: String
     let sshFingerprint: String
     let identityCount: Int
-    let protection: String
+    let protection: CTKProtection
 }
 
 private struct IdentityResolver {
@@ -398,8 +398,8 @@ private func providerEnvironment(hash: String) -> [String: String] {
     ["KEYCHAIN_CERTIFICATES": hash, "SSH_SK_PROVIDER": providerPath]
 }
 
-private func downloadInput(selecting index: Int, count: Int, protection: String, passphrase: Data) -> Data {
-    var input = AskPassResponder.pinReply(protection == "bio" ? Data() : Data("0".utf8))
+private func downloadInput(selecting index: Int, count: Int, protection: CTKProtection, passphrase: Data) -> Data {
+    var input = AskPassResponder.pinReply(protection.providerPIN)
     input.append(AskPassResponder.passphraseReply(passphrase))
     input.append(AskPassResponder.passphraseReply(passphrase))
     if index > 1 { input.append(Data(String(repeating: "y\n", count: index - 1).utf8)) }

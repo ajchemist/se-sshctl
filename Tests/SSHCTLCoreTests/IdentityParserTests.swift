@@ -14,7 +14,8 @@ import Testing
     #expect(identities[1].label == "deploy key 東京")
     #expect(identities[2].label == "prod $(touch nope)")
     #expect(identities[0].ctkPublicKeyHash == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-    #expect(identities[0].protection == "none")
+    #expect(identities[0].protection == .none)
+    #expect(identities[0].keyType == .p256NonExportable)
     #expect(identities[0].certificateValid == true)
     #expect(identities[2].certificateValid == false)
 }

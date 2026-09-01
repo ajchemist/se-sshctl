@@ -69,6 +69,28 @@ import Testing
     #expect(try JSONOutput.encode(report) == #"{"hashEncoding":"hex","hashType":"sha256","identities":[],"schemaVersion":2}"#)
 }
 
+@Test func jsonKeyTypeAndProtectionKeepTheirNativeScAuthSpelling() throws {
+    // Typing these fields must not change the wire format: external tooling
+    // reads the sc_auth values, not Swift case names.
+    let report = IdentityListReport(identities: [
+        CTKIdentity(
+            keyType: .p256NonExportable,
+            ctkPublicKeyHash: String(repeating: "A", count: 64),
+            protection: .none,
+            label: "deploy",
+            commonName: "",
+            emailAddress: "",
+            validTo: "2027-01-01 00:00:00 +0000",
+            certificateValid: true
+        ),
+    ])
+
+    let json = try JSONOutput.encode(report)
+
+    #expect(json.contains(#""keyType":"p-256-ne""#))
+    #expect(json.contains(#""protection":"none""#))
+}
+
 private func result(
     stdout: String = "",
     stderr: String = "",
