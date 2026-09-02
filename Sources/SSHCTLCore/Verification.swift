@@ -239,6 +239,7 @@ public struct RemoteVerifier {
         ctkSHA256 hash: String,
         identityFile: String,
         target: String,
+        sshOptions: [String] = [],
         passphrase: Data? = nil
     ) throws -> VerificationReport {
         var checks = VerificationChecks()
@@ -248,6 +249,11 @@ public struct RemoteVerifier {
             guard !target.isEmpty, !target.hasPrefix("-"),
                   !target.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains) else {
                 throw OperationalCommandError.invalidHostPattern
+            }
+            guard sshOptions.allSatisfy({
+                !$0.isEmpty && !$0.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            }) else {
+                throw OperationalCommandError.invalidSSHOption
             }
             let preflight = try verificationPreflight(
                 executor: executor,
@@ -264,7 +270,8 @@ public struct RemoteVerifier {
                 let result = try executor.run(SubprocessRequest(
                     executable: .ssh,
                     arguments: isolatedSSHArguments(
-                        identityFile: identityFile, target: target, unlocking: unlock != nil
+                        identityFile: identityFile, target: target, unlocking: unlock != nil,
+                        extraOptions: sshOptions
                     ),
                     environment: providerEnvironment(ctkSHA1Hash: preflight.resolved.ctkSHA1Hash)
                         .merging(unlock?.environment ?? [:]) { _, new in new },
@@ -313,7 +320,11 @@ public struct RemoteVerifier {
 /// prompt and fails closed on anything else, and the 30s timeout still kills
 /// the process tree. Without this an encrypted identity file could never be
 /// verified at all.
-private func isolatedSSHArguments(identityFile: String, target: String, unlocking: Bool) -> [String] {
+/// `extraOptions` come last on purpose: ssh keeps the first value it sees for
+/// an option, so nothing appended here can override the isolation set above it.
+private func isolatedSSHArguments(
+    identityFile: String, target: String, unlocking: Bool, extraOptions: [String] = []
+) -> [String] {
     [
         // -v records the authentication method progression, which is the only
         // client-side evidence of why a public-key attempt was refused.
@@ -334,6 +345,7 @@ private func isolatedSSHArguments(identityFile: String, target: String, unlockin
         "-o", "PubkeyAuthentication=yes",
         "-o", "SecurityKeyProvider=\(providerPath)",
         "-o", "IdentityFile=\(identityFile)",
+    ] + extraOptions.flatMap { ["-o", $0] } + [
         "--", target, "true",
     ]
 }

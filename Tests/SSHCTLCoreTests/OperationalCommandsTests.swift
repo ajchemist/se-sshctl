@@ -258,6 +258,42 @@ import Testing
     #expect(ssh.environment["KEYCHAIN_CERTIFICATES"] == String(repeating: "B", count: 40))
 }
 
+@Test func remoteVerificationAppendsSSHOptionsAfterTheIsolationSet() throws {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let identityFile = root.appendingPathComponent("identity")
+    try Data("identityFile".utf8).write(to: identityFile)
+    try Data("sk-ecdsa-sha2-nistp256@openssh.com QUFBQQ== test\n".utf8)
+        .write(to: URL(fileURLWithPath: identityFile.path + ".pub"))
+    let executor = OperationalExecutor()
+    let proxy = "ProxyCommand=nc -x 127.0.0.1:9050 -X 5 %h %p"
+
+    _ = try RemoteVerifier(executor: executor).verify(
+        ctkSHA256: hash,
+        identityFile: identityFile.path,
+        target: "deploy@example.test",
+        sshOptions: ["Port=2222", proxy]
+    )
+
+    let arguments = executor.requests.first { $0.executable == .ssh }!.arguments
+    // Appended after every isolation option and before the target, so ssh's
+    // first-value-wins rule keeps the isolation set in charge.
+    let batch = arguments.firstIndex(of: "BatchMode=yes")!
+    let port = arguments.firstIndex(of: "Port=2222")!
+    let proxyIndex = arguments.firstIndex(of: proxy)!
+    #expect(batch < port && port < proxyIndex && proxyIndex < arguments.firstIndex(of: "--")!)
+    #expect(arguments[port - 1] == "-o" && arguments[proxyIndex - 1] == "-o")
+
+    #expect(throws: VerificationFailed.self) {
+        try RemoteVerifier(executor: OperationalExecutor()).verify(
+            ctkSHA256: hash, identityFile: identityFile.path, target: "deploy@example.test",
+            sshOptions: ["Port=22\nPasswordAuthentication=yes"]
+        )
+    }
+}
+
 @Test func failedRemoteVerificationStillReportsWhichChecksRan() throws {
     // The spec requires passed, failed, and not-run to stay distinct. A
     // failure must not collapse into a bare error that loses the provider

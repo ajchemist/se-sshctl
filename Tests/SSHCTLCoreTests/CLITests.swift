@@ -209,7 +209,7 @@ private func healthyDoctorResults() -> [Result<SubprocessResult, Error>] {
         (["manifest", "prune", "--help"], ["--json"]),
         (["config", "render", "--help"], ["--identity-file", "--host-pattern", "--json"]),
         (["verify", "local", "--help"], ["--ctk-sha256", "--identity-file", "--json"]),
-        (["verify", "remote", "--help"], ["--ctk-sha256", "--identity-file", "--target", "--json"]),
+        (["verify", "remote", "--help"], ["--ctk-sha256", "--identity-file", "--target", "--ssh-option", "--json"]),
     ]
 
     for (arguments, options) in cases {

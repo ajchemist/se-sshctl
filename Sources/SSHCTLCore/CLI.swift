@@ -205,7 +205,8 @@ public enum CLI {
             let options = try Options(
                 Array(arguments.dropFirst(2)),
                 values: ["--ctk-sha256", "--identity-file", "--target"],
-                flags: ["--json"]
+                flags: ["--json"],
+                repeatable: ["--ssh-option"]
             )
             let identityFilePath = expand(try options.required("--identity-file"), homeDirectory: homeDirectory)
             let report = try recording(into: manifestStore, identityFile: identityFilePath) {
@@ -213,6 +214,7 @@ public enum CLI {
                     ctkSHA256: try options.required("--ctk-sha256"),
                     identityFile: identityFilePath,
                     target: try options.required("--target"),
+                    sshOptions: options.values("--ssh-option"),
                     passphrase: try unlockPassphrase(
                         forIdentityFileAt: identityFilePath,
                         fileManager: fileManager,
@@ -253,15 +255,25 @@ public enum CLI {
 
 private struct Options {
     private var values: [String: String] = [:]
+    private var lists: [String: [String]] = [:]
     private var flags: Set<String> = []
 
-    init(_ arguments: [String], values valueNames: Set<String>, flags flagNames: Set<String>) throws {
+    init(
+        _ arguments: [String],
+        values valueNames: Set<String>,
+        flags flagNames: Set<String>,
+        repeatable repeatableNames: Set<String> = []
+    ) throws {
         var index = 0
         while index < arguments.count {
             let name = arguments[index]
             if flagNames.contains(name) {
                 guard flags.insert(name).inserted else { throw CLIError.usage("duplicate option: \(name)") }
                 index += 1
+            } else if repeatableNames.contains(name) {
+                guard index + 1 < arguments.count else { throw CLIError.usage("missing value for \(name)") }
+                lists[name, default: []].append(arguments[index + 1])
+                index += 2
             } else if valueNames.contains(name) {
                 guard values[name] == nil else { throw CLIError.usage("duplicate option: \(name)") }
                 guard index + 1 < arguments.count else { throw CLIError.usage("missing value for \(name)") }
@@ -274,6 +286,7 @@ private struct Options {
     }
 
     func value(_ name: String) -> String? { values[name] }
+    func values(_ name: String) -> [String] { lists[name] ?? [] }
     func has(_ name: String) -> Bool { flags.contains(name) }
 
     func required(_ name: String) throws -> String {
@@ -524,7 +537,7 @@ COMMANDS
   se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--no-passphrase] [--json]
   se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
   se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
-  se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--json]
+  se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--ssh-option OPT]... [--json]
   se-sshctl manifest list|prune [--json]
 
 WORKFLOW
@@ -812,8 +825,7 @@ over a pipe, never through arguments or the environment.
 
 private let verifyRemoteHelp = """
 USAGE
-  se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--json]
-  se-sshctl manifest list|prune [--json]
+  se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--ssh-option OPT]... [--json]
 
 Performs a public-key-only BatchMode SSH authentication and runs the fixed remote command 'true'.
 It does not install or revoke remote authorized_keys entries.
@@ -831,6 +843,13 @@ OPTIONS
   --ctk-sha256 SHA256  Select exactly one identity by its 64-character CTK SHA-256 public-key hash.
   --identity-file PATH  Use only the installed identity file at PATH.
   --target HOST         Connect to HOST, normally user@hostname, using isolated SSH options.
+  --ssh-option OPT      Pass 'ssh -o OPT' (ssh_config syntax, e.g. Port=2222 or
+                        'ProxyCommand=nc -x 127.0.0.1:9050 -X 5 %h %p'). Repeatable. The
+                        client runs with -F none, so nothing from ~/.ssh/config applies;
+                        this is how a target behind a jump or proxy is reached. Each OPT is
+                        placed after the isolation options, and ssh keeps the first value
+                        it sees for an option, so an OPT cannot re-enable the agent, the
+                        user config, or password methods.
   --json                Emit the versioned machine-readable report instead of text.
 
 An unencrypted identity file verifies with no prompt and no terminal. Unlocking an encrypted
