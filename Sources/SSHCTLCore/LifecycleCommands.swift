@@ -15,6 +15,7 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
     case invalidProtection
     case invalidHash
     case unattendedSigningNotAcknowledged
+    case labelInUse(String, [String])
     case operationBusy
     case commandFailed(String)
     case creationNotIdentified(Int)
@@ -34,6 +35,9 @@ public enum IdentityLifecycleError: Error, LocalizedError, Equatable {
             "CTK SHA-256 hash must be exactly 64 hexadecimal characters"
         case .unattendedSigningNotAcknowledged:
             "-t none requires --allow-unattended-signing"
+        case let .labelInUse(label, hashes):
+            "--unique: an identity labelled \"\(label)\" already exists (CTK SHA-256/hex "
+                + hashes.joined(separator: ", ") + ")"
         case .operationBusy:
             "another se-sshctl identity operation is running"
         case let .commandFailed(detail):
@@ -63,7 +67,8 @@ public struct IdentityCreator {
         label: String,
         keyType: String,
         protection: String,
-        allowUnattendedSigning: Bool
+        allowUnattendedSigning: Bool,
+        unique: Bool = false
     ) throws -> IdentityCreateReport {
         try validateLabel(label)
         // sc_auth values arrive as argv strings; decode them once here so the
@@ -81,6 +86,13 @@ public struct IdentityCreator {
         let lock = try OperationLock(directory: lockDirectory)
         defer { withExtendedLifetime(lock) {} }
         let before = try IdentityLister(executor: executor).list().identities
+        // Labels are not unique to sc_auth, and a second identity with the
+        // same label and parameters cannot be told apart by this tool
+        // afterwards (see IdentityResolver). --unique refuses up front.
+        let sameLabel = before.filter { $0.label == label }
+        guard !unique || sameLabel.isEmpty else {
+            throw IdentityLifecycleError.labelInUse(label, sameLabel.map { $0.ctkPublicKeyHash.uppercased() })
+        }
         try requireSuccess(executor.run(SubprocessRequest(
             executable: .scAuth,
             arguments: [

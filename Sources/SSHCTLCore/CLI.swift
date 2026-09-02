@@ -83,7 +83,7 @@ public enum CLI {
             let options = try Options(
                 Array(arguments.dropFirst(2)),
                 values: ["-l", "-k", "-t"],
-                flags: ["--allow-unattended-signing", "--json"]
+                flags: ["--allow-unattended-signing", "--unique", "--json"]
             )
             let report = try IdentityCreator(
                 executor: executor,
@@ -92,7 +92,8 @@ public enum CLI {
                 label: try options.required("-l"),
                 keyType: try options.required("-k"),
                 protection: try options.required("-t"),
-                allowUnattendedSigning: options.has("--allow-unattended-signing")
+                allowUnattendedSigning: options.has("--allow-unattended-signing"),
+                unique: options.has("--unique")
             )
             return options.has("--json") ? try JSONOutput.encode(report) : human(report)
         case ["identity", "delete"]:
@@ -518,7 +519,7 @@ COMMANDS
   se-sshctl --version
   se-sshctl doctor [--json]
   se-sshctl identity list [-t sha1|sha256|ssh] [-e hex|b64] [--json]
-  se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--json]
+  se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--unique] [--json]
   se-sshctl identity delete --ctk-sha256 SHA256 [--confirm SHA256] [--json]
   se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--no-passphrase] [--json]
   se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
@@ -592,7 +593,7 @@ OPTIONS
 
 private let identityCreateHelp = """
 USAGE
-  se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--json]
+  se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--unique] [--json]
   se-sshctl identity delete --ctk-sha256 SHA256 [--confirm SHA256] [--json]
 
 Invokes 'sc_auth create-ctk-identity'. Its parameter names and values are preserved.
@@ -606,6 +607,10 @@ OPTIONS
   -k p-256-ne                 sc_auth non-exportable P-256 key type; required explicitly.
   -t bio|none                 sc_auth private-key protection; required explicitly.
   --allow-unattended-signing  Required acknowledgement when -t none is selected.
+  --unique                    Refuse when an identity with LABEL already exists, naming its
+                              CTK SHA-256 hash. sc_auth allows duplicate labels, but two
+                              identities with the same label and parameters cannot be told
+                              apart by this tool afterwards, so automation should pass this.
   --json                      Emit the versioned machine-readable report instead of text.
 """
 

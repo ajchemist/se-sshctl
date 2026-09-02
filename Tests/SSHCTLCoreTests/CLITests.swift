@@ -202,7 +202,7 @@ private func healthyDoctorResults() -> [Result<SubprocessResult, Error>] {
     let cases: [([String], [String])] = [
         (["doctor", "--help"], ["--json"]),
         (["identity", "list", "--help"], ["-t", "sha1|sha256|ssh", "-e", "hex|b64", "--json"]),
-        (["identity", "create", "--help"], ["-l", "-k", "-t", "p-256-ne", "bio|none", "--allow-unattended-signing", "--json"]),
+        (["identity", "create", "--help"], ["-l", "-k", "-t", "p-256-ne", "bio|none", "--allow-unattended-signing", "--unique", "--json"]),
         (["install", "--help"], ["--ctk-sha256", "--identity-file", "--no-passphrase", "--json"]),
         (["identity", "delete", "--help"], ["--ctk-sha256", "--confirm", "SHA256", "sc_auth delete-ctk-identity", "--json"]),
         (["manifest", "list", "--help"], ["--json"]),

@@ -42,6 +42,24 @@ import Testing
     ])
 }
 
+@Test func uniqueCreationRefusesAnExistingLabelBeforeTouchingScAuth() throws {
+    let lockDirectory = uniqueTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: lockDirectory) }
+    let executor = FakeSubprocessExecutor(results: [
+        .success(lifecycleResult(stdout: identityFixture(includeIdentity: true))),
+    ])
+
+    #expect(throws: IdentityLifecycleError.labelInUse("deploy key 東京", [String(repeating: "A", count: 64)])) {
+        try CLI.run(
+            arguments: ["identity", "create", "-l", "deploy key 東京", "-k", "p-256-ne", "-t", "bio", "--unique"],
+            executor: executor,
+            lockDirectory: lockDirectory
+        )
+    }
+    // Only the listing ran; no create-ctk-identity was attempted.
+    #expect(executor.requests.map(\.arguments.first) == ["list-ctk-identities"])
+}
+
 @Test func creationRejectsNonSSHKeyTypesAndUnknownProtection() {
     let executor = FakeSubprocessExecutor(results: [])
 
