@@ -106,9 +106,9 @@ se-sshctl config render --identity-file "$IDENTITY_FILE" --host-pattern host.exa
 Add the rendered block to `~/.ssh/config`. The command only prints the block;
 it does not modify the file.
 
-To select the identity by a tag on any host instead of by host pattern, render
-a `Match tagged` block and pass the tag on the command line (OpenSSH 9.4 or
-later):
+To select the identity by a tag instead of by host pattern, render a
+`Match final tagged` block and either pass the tag on the command line or pin
+it in a Host block (OpenSSH 9.4 or later):
 
 ```sh
 se-sshctl config render --identity-file "$IDENTITY_FILE" --tag example > ~/.ssh/example.conf
@@ -116,8 +116,15 @@ se-sshctl config render --identity-file "$IDENTITY_FILE" --tag example > ~/.ssh/
 ssh -P example user@host.example
 ```
 
-The tag block ends with `Match all`, so an `Include` at the top of the file does
-not pull the lines after it into the block.
+```
+Host host.example
+    Tag example        # every ssh host.example uses the identity; -P still wins
+```
+
+`final` makes the pinned form work: `Match` is evaluated once in file order,
+so without it an Include at the top would never see a `Tag` set in a Host block
+below. The block ends with `Match all`, so an `Include` at the top of the file
+does not pull the lines after it into the block.
 
 ### 5. Verify remote authentication
 
@@ -218,7 +225,7 @@ Nothing is resolved through `PATH`, and the provider path is not configurable.
 | `install` | `ssh-keygen -K -w /usr/lib/ssh-keychain.dylib` | Runs in isolated directories and refuses overwrite; works around `-K` ignoring the provider filter by selecting on SSH fingerprint; answers OpenSSH prompts through a prompt-validating askpass that fails closed; installs 0400/0444 |
 | `verify local` | `ssh-keygen -Y sign` then `ssh-keygen -Y verify` | Fingerprint and provider preflight; signs a throwaway challenge and verifies the signature against the installed public key; tri-state report |
 | `verify remote` | `ssh -v` with every ambient identity source disabled | Proves the selected identity alone authenticated; captures the client log; tri-state report; `--ssh-option` reaches proxied targets without loosening isolation |
-| `config render` | none | Prints a `Host` or `Match tagged` block; never writes `~/.ssh/config` |
+| `config render` | none | Prints a `Host` or `Match final tagged` block; never writes `~/.ssh/config` |
 | `manifest list`, `manifest prune` | none | Local verification records only |
 
 `sc_auth` subcommands this tool deliberately does not wrap:

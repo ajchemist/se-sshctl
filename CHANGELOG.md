@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed: `config render --tag` emits `Match final tagged`
+
+`final` re-evaluates the block in ssh's final pass, so a `Tag TAG` line in a
+Host block further down `~/.ssh/config` now selects the identity even when the
+rendered file is `Include`d at the top. `ssh -P TAG` behaves as before and wins
+over a Host-block Tag. Measured with `ssh -G` on OpenSSH 10.3.
+
+### Fixed: `install` reports OpenSSH's own failure
+
+When the provider refuses before the prompts complete, the error is now
+OpenSSH's message instead of "native askpass rejected an unexpected OpenSSH
+prompt".
+
 ## 0.3.0
 
 No compatibility breaks. Existing invocations behave as before; one check is

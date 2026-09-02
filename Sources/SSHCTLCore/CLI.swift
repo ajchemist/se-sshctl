@@ -791,16 +791,19 @@ USAGE
 Renders an SSH config block to stdout. It does not modify ~/.ssh/config.
 
 --host-pattern renders a 'Host PATTERN' block: the identity is used for hosts
-matching the pattern. --tag renders a 'Match tagged TAG' block instead: the
-identity is used on any target when ssh is run as 'ssh -P TAG user@host'
-(OpenSSH 9.4 or later), selecting by tag rather than by host. The tag block ends with 'Match all', so the output can be saved to a file
+matching the pattern. --tag renders a 'Match final tagged TAG' block instead:
+the identity is used on any target when ssh is run as 'ssh -P TAG user@host'
+(OpenSSH 9.4 or later), or on one host whose Host block says 'Tag TAG' (-P wins
+when both are given). 'final' re-evaluates the block in ssh's final pass, which
+is what lets a Tag set further down ~/.ssh/config reach a block Include'd at
+the top. The block ends with 'Match all', so the output can be saved to a file
 and 'Include'd at the top of ~/.ssh/config: without that line, everything after
 the Include would still be inside the Match block.
 
 OPTIONS
   --identity-file PATH   Set IdentityFile to the installed Secure Enclave identity file PATH.
   --host-pattern PATTERN Render a Host block for PATTERN.
-  --tag TAG              Render a Match tagged block for TAG (one word), selected with ssh -P TAG.
+  --tag TAG              Render a Match final tagged block for TAG (one word): ssh -P TAG, or Tag TAG in a Host block.
   --json                 Emit a versioned object containing the rendered config instead of raw text.
 """
 

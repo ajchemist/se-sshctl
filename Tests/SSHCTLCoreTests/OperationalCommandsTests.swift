@@ -240,7 +240,7 @@ import Testing
     let report = try SSHConfigRenderer().render(identityFile: "/tmp/key", tag: "work")
 
     #expect(report.config == """
-    Match tagged work
+    Match final tagged work
         IdentityFile "/tmp/key"
         SecurityKeyProvider /usr/lib/ssh-keychain.dylib
         IdentitiesOnly yes
@@ -253,7 +253,7 @@ import Testing
 
     let executor = FakeSubprocessExecutor(results: [])
     #expect(try CLI.run(arguments: ["config", "render", "--identity-file", "~/k", "--tag", "work"], executor: executor)
-        .hasPrefix("Match tagged work"))
+        .hasPrefix("Match final tagged work"))
     #expect(throws: CLIError.self) {
         try CLI.run(arguments: ["config", "render", "--identity-file", "/k", "--tag", "a", "--host-pattern", "b"], executor: executor)
     }
