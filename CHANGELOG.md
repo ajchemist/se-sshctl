@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.3.0
+
+No compatibility breaks. Existing invocations behave as before; one check is
+looser, on purpose, and is listed under Changed.
+
+### Added: `identity create --unique`
+
+`sc_auth` allows duplicate labels, and two identities with the same label and
+parameters cannot be told apart by this tool afterwards: `IdentityResolver`
+refuses to guess between rows with identical metadata, so neither `install` nor
+`identity delete` can reach either of them. `--unique` refuses up front when an
+identity with the label already exists, naming its CTK SHA-256 hash, before
+`sc_auth` is invoked. Automation that creates by label should pass it.
+
+### Added: `verify remote --ssh-option OPT`
+
+The isolated client runs with `-F none`, so a target behind a jump host or a
+proxy could not be verified at all. `--ssh-option` (repeatable, `ssh -o`
+syntax, e.g. `Port=2222` or `ProxyCommand=nc -x 127.0.0.1:9050 -X 5 %h %p`)
+appends `-o OPT` after the isolation set. `ssh` keeps the first value it sees
+for an option, so an appended one cannot re-enable the agent, the user config,
+or password methods. Control characters are rejected. Recorded in
+`docs/THREAT_MODEL.md`.
+
+### Added: `config render --tag TAG`
+
+Renders a `Match tagged TAG` block instead of a `Host` block, so the identity
+is selected by tag rather than by host: `ssh -P TAG user@host` uses it on any
+target (OpenSSH 9.4 or later). The block ends with `Match all`, so the output
+can be saved to a file and `Include`d at the top of `~/.ssh/config` without
+pulling the lines after the Include into the block. Exactly one of
+`--host-pattern` or `--tag` is required.
+
+### Changed: an existing identity-file directory is refused only when writable
+
+`install` refused any pre-existing parent directory with group or other bits,
+so a common 755 `~/.ssh/identities` failed with `insecureDirectory` even though
+the installed file is 0400 and holds a handle, not key material. The threat in
+that directory is a swap, not a read: it now refuses group- or world-writable
+directories and accepts readable ones. Missing directories are still created
+0700. The error text changed from "accessible" to "writable".
+
+### Added: release binaries
+
+Each GitHub Release now carries `se-sshctl-<version>-macos-universal.tar.gz`
+(one universal arm64 + x86_64 `se-sshctl`) and `SHA256SUMS`, so a nix
+expression or a script can pin a binary by tag and hash instead of depending on
+the Homebrew bottle. The tap dispatch payload gains `asset` and `asset_url`.
+See `docs/RELEASING.md`.
+
 ## 0.2.0
 
 Breaks compatibility in several places. Every break is listed here with what

@@ -20,6 +20,10 @@ implementation.
 brew install ajchemist/tap/se-sshctl
 ```
 
+Each GitHub Release also carries `se-sshctl-<version>-macos-universal.tar.gz`
+(one universal `se-sshctl` binary) and `SHA256SUMS`, for anything that pins a
+binary by tag and hash (see `docs/RELEASING.md`).
+
 Or build from source:
 
 ```sh
@@ -52,7 +56,9 @@ provider. It does not change the system.
 se-sshctl identity create -l example-key -k p-256-ne -t bio
 ```
 
-`p-256-ne` creates a non-exportable private key. `bio` requires user approval
+`p-256-ne` creates a non-exportable private key. Labels are not unique to
+`sc_auth`; `--unique` refuses when an identity with the label already exists,
+which is what a script that creates by label should pass. `bio` requires user approval
 for private-key operations. Copy the full `CTK SHA-256/hex` value from the
 command output, then set these shell variables:
 
@@ -100,6 +106,19 @@ se-sshctl config render --identity-file "$IDENTITY_FILE" --host-pattern host.exa
 Add the rendered block to `~/.ssh/config`. The command only prints the block;
 it does not modify the file.
 
+To select the identity by a tag on any host instead of by host pattern, render
+a `Match tagged` block and pass the tag on the command line (OpenSSH 9.4 or
+later):
+
+```sh
+se-sshctl config render --identity-file "$IDENTITY_FILE" --tag example > ~/.ssh/example.conf
+# then, at the top of ~/.ssh/config:  Include ~/.ssh/example.conf
+ssh -P example user@host.example
+```
+
+The tag block ends with `Match all`, so an `Include` at the top of the file does
+not pull the lines after it into the block.
+
 ### 5. Verify remote authentication
 
 ```sh
@@ -108,7 +127,10 @@ ssh user@host.example
 ```
 
 The verification command uses only the selected CTK identity. It does not
-install or remove an `authorized_keys` entry.
+install or remove an `authorized_keys` entry. It ignores `~/.ssh/config`, so a
+target behind a proxy or on another port is named with `--ssh-option`
+(repeatable, `ssh -o` syntax), e.g. `--ssh-option Port=2222`; these are
+appended after the isolation options and cannot override them.
 
 Run any command with `--help` for all options and security effects.
 
@@ -191,12 +213,12 @@ Nothing is resolved through `PATH`, and the provider path is not configurable.
 | --- | --- | --- |
 | `doctor` | `sw_vers`, `uname -m`, `ssh -V`, `codesign --verify --strict` and `-dr -` on the provider | Reports path, signature validity, Apple anchor, and identifier as four separate signals; warns below the verified macOS floor |
 | `identity list` | `sc_auth list-ctk-identities -t TYPE -e ENCODING` | Column-boundary parsing that survives labels with spaces and Unicode; strict field validation; versioned JSON |
-| `identity create` | `sc_auth create-ctk-identity -l LABEL -k TYPE -t PROT` | Refuses key types Apple's SSH provider cannot use; requires `--allow-unattended-signing` for `-t none`; snapshots the inventory before and after and proves exactly one matching identity appeared; never auto-deletes on partial failure |
+| `identity create` | `sc_auth create-ctk-identity -l LABEL -k TYPE -t PROT` | Refuses key types Apple's SSH provider cannot use; requires `--allow-unattended-signing` for `-t none`; snapshots the inventory before and after and proves exactly one matching identity appeared; never auto-deletes on partial failure; `--unique` refuses an existing label |
 | `identity delete` | `sc_auth delete-ctk-identity -h SHA1` | Selects by the stable SHA-256 hash and resolves the SHA-1 locator internally; refuses ambiguous metadata; shows the SSH fingerprint before approval; verifies absence in both hash formats; removes the dead identity file and verification record |
 | `install` | `ssh-keygen -K -w /usr/lib/ssh-keychain.dylib` | Runs in isolated directories and refuses overwrite; works around `-K` ignoring the provider filter by selecting on SSH fingerprint; answers OpenSSH prompts through a prompt-validating askpass that fails closed; installs 0400/0444 |
 | `verify local` | `ssh-keygen -Y sign` then `ssh-keygen -Y verify` | Fingerprint and provider preflight; signs a throwaway challenge and verifies the signature against the installed public key; tri-state report |
-| `verify remote` | `ssh -v` with every ambient identity source disabled | Proves the selected identity alone authenticated; captures the client log; tri-state report |
-| `config render` | none | Prints a config block; never writes `~/.ssh/config` |
+| `verify remote` | `ssh -v` with every ambient identity source disabled | Proves the selected identity alone authenticated; captures the client log; tri-state report; `--ssh-option` reaches proxied targets without loosening isolation |
+| `config render` | none | Prints a `Host` or `Match tagged` block; never writes `~/.ssh/config` |
 | `manifest list`, `manifest prune` | none | Local verification records only |
 
 `sc_auth` subcommands this tool deliberately does not wrap:

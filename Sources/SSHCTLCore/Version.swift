@@ -4,4 +4,4 @@
 /// a tarball, a tag, or a working tree all answer the same way. The release
 /// workflow refuses to publish a tag whose value here does not match it, so a
 /// binary cannot claim a version it was not built for.
-public let seSSHCTLVersion = "0.2.0"
+public let seSSHCTLVersion = "0.3.0"
