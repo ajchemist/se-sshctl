@@ -174,13 +174,19 @@ public enum CLI {
         case ["config", "render"]:
             let options = try Options(
                 Array(arguments.dropFirst(2)),
-                values: ["--identity-file", "--host-pattern"],
+                values: ["--identity-file", "--host-pattern", "--tag"],
                 flags: ["--json"]
             )
-            let report = try SSHConfigRenderer().render(
-                identityFile: expand(try options.required("--identity-file"), homeDirectory: homeDirectory),
-                hostPattern: try options.required("--host-pattern")
-            )
+            let identityFile = expand(try options.required("--identity-file"), homeDirectory: homeDirectory)
+            let report: ConfigRenderReport
+            switch (options.value("--host-pattern"), options.value("--tag")) {
+            case let (pattern?, nil):
+                report = try SSHConfigRenderer().render(identityFile: identityFile, hostPattern: pattern)
+            case let (nil, tag?):
+                report = try SSHConfigRenderer().render(identityFile: identityFile, tag: tag)
+            default:
+                throw CLIError.usage("config render takes exactly one of --host-pattern or --tag")
+            }
             return options.has("--json") ? try JSONOutput.encode(report) : report.config
         case ["verify", "local"]:
             let options = try Options(
@@ -535,7 +541,7 @@ COMMANDS
   se-sshctl identity create -l LABEL -k p-256-ne -t bio|none [--allow-unattended-signing] [--unique] [--json]
   se-sshctl identity delete --ctk-sha256 SHA256 [--confirm SHA256] [--json]
   se-sshctl install --ctk-sha256 SHA256 [--identity-file PATH] [--no-passphrase] [--json]
-  se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
+  se-sshctl config render --identity-file PATH (--host-pattern PATTERN | --tag TAG) [--json]
   se-sshctl verify local --ctk-sha256 SHA256 --identity-file PATH [--json]
   se-sshctl verify remote --ctk-sha256 SHA256 --identity-file PATH --target HOST [--ssh-option OPT]... [--json]
   se-sshctl manifest list|prune [--json]
@@ -778,13 +784,21 @@ Run 'se-sshctl config render --help' for every option.
 
 private let configRenderHelp = """
 USAGE
-  se-sshctl config render --identity-file PATH --host-pattern PATTERN [--json]
+  se-sshctl config render --identity-file PATH (--host-pattern PATTERN | --tag TAG) [--json]
 
 Renders an SSH config block to stdout. It does not modify ~/.ssh/config.
 
+--host-pattern renders a 'Host PATTERN' block: the identity is used for hosts
+matching the pattern. --tag renders a 'Match tagged TAG' block instead: the
+identity is used on any target when ssh is run as 'ssh -P TAG user@host'
+(OpenSSH 9.4 or later), selecting by tag rather than by host. The tag block ends with 'Match all', so the output can be saved to a file
+and 'Include'd at the top of ~/.ssh/config: without that line, everything after
+the Include would still be inside the Match block.
+
 OPTIONS
   --identity-file PATH   Set IdentityFile to the installed Secure Enclave identity file PATH.
-  --host-pattern PATTERN Set the SSH Host pattern for the rendered block.
+  --host-pattern PATTERN Render a Host block for PATTERN.
+  --tag TAG              Render a Match tagged block for TAG (one word), selected with ssh -P TAG.
   --json                 Emit a versioned object containing the rendered config instead of raw text.
 """
 

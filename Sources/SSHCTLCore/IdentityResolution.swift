@@ -8,6 +8,7 @@ public enum OperationalCommandError: Error, LocalizedError, Equatable {
     case invalidPath
     case invalidHostPattern
     case invalidSSHOption
+    case invalidTag
     case identityFileExists
     case insecureDirectory
     case commandFailed(String)
@@ -26,6 +27,7 @@ public enum OperationalCommandError: Error, LocalizedError, Equatable {
         case .invalidPath: "path must be non-empty and contain no control characters"
         case .invalidHostPattern: "host pattern must be non-empty and contain no control characters"
         case .invalidSSHOption: "--ssh-option must be non-empty and contain no control characters"
+        case .invalidTag: "tag must be one word with no whitespace or control characters"
         case .identityFileExists: "identity file or its .pub file already exists"
         case .insecureDirectory: "identity-file directory must not be accessible by group or other users"
         case let .commandFailed(detail): "OpenSSH command failed" + (detail.isEmpty ? "" : ": \(detail)")

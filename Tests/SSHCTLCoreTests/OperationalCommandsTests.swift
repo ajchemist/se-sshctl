@@ -196,6 +196,32 @@ import Testing
     }
 }
 
+@Test func tagRenderingProducesAClosedMatchBlockAndRejectsMultiWordTags() throws {
+    let report = try SSHConfigRenderer().render(identityFile: "/tmp/key", tag: "work")
+
+    #expect(report.config == """
+    Match tagged work
+        IdentityFile "/tmp/key"
+        SecurityKeyProvider /usr/lib/ssh-keychain.dylib
+        IdentitiesOnly yes
+        ForwardAgent no
+    Match all
+    """)
+    #expect(throws: OperationalCommandError.invalidTag) {
+        try SSHConfigRenderer().render(identityFile: "/tmp/key", tag: "work home")
+    }
+
+    let executor = FakeSubprocessExecutor(results: [])
+    #expect(try CLI.run(arguments: ["config", "render", "--identity-file", "~/k", "--tag", "work"], executor: executor)
+        .hasPrefix("Match tagged work"))
+    #expect(throws: CLIError.self) {
+        try CLI.run(arguments: ["config", "render", "--identity-file", "/k", "--tag", "a", "--host-pattern", "b"], executor: executor)
+    }
+    #expect(throws: CLIError.self) {
+        try CLI.run(arguments: ["config", "render", "--identity-file", "/k"], executor: executor)
+    }
+}
+
 @Test func localVerificationSignsAndVerifiesATemporaryChallenge() throws {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

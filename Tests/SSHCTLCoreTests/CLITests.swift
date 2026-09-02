@@ -207,7 +207,7 @@ private func healthyDoctorResults() -> [Result<SubprocessResult, Error>] {
         (["identity", "delete", "--help"], ["--ctk-sha256", "--confirm", "SHA256", "sc_auth delete-ctk-identity", "--json"]),
         (["manifest", "list", "--help"], ["--json"]),
         (["manifest", "prune", "--help"], ["--json"]),
-        (["config", "render", "--help"], ["--identity-file", "--host-pattern", "--json"]),
+        (["config", "render", "--help"], ["--identity-file", "--host-pattern", "--tag", "ssh -P", "--json"]),
         (["verify", "local", "--help"], ["--ctk-sha256", "--identity-file", "--json"]),
         (["verify", "remote", "--help"], ["--ctk-sha256", "--identity-file", "--target", "--ssh-option", "--json"]),
     ]
