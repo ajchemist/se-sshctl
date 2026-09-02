@@ -86,7 +86,14 @@ public struct IdentityFileInstaller {
                 timeout: 120
             ))
             if result.timedOut { throw OperationalCommandError.commandFailed("timed out") }
-            try requireExpectedAskPassTraffic(in: result.stderr)
+            do {
+                try requireExpectedAskPassTraffic(in: result.stderr)
+            } catch where !result.succeeded {
+                // OpenSSH gave up before the prompts could complete (a provider
+                // that cannot load the identity, for one); its own message is
+                // the finding, not the prompt count it never reached.
+                throw OperationalCommandError.commandFailed(openSSHDetail(in: result.stderr))
+            }
             if identityIndex == resolved.identityCount { fullDownloadResult = result }
 
             let files = try fileManager.contentsOfDirectory(
@@ -153,6 +160,14 @@ public struct IdentityFileInstaller {
         let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777
         guard permissions & 0o022 == 0 else { throw OperationalCommandError.insecureDirectory }
     }
+}
+
+/// OpenSSH's stderr without the askpass responder's marker lines.
+private func openSSHDetail(in stderr: String) -> String {
+    stderr.split(separator: "\n")
+        .filter { !$0.hasPrefix(AskPassResponder.successMarker) && $0 != Substring(AskPassResponder.failureMarker) }
+        .joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 /// Fails closed on anything but the exact prompt traffic this download expects:

@@ -255,3 +255,34 @@ The workflow `-t none` exists for — a remote Mac initiating outbound SSH with
 nobody at its console — works, on the condition that the account stays logged in.
 The screen may be locked. This is the tool's central operational constraint and
 is recorded in README.md and docs/THREAT_MODEL.md.
+
+## Identity-file download refused on one Mac — 2026-09-02
+
+Observed, not yet explained:
+
+```text
+host:       mac-studio-m4m (Mac16,9, Apple M4 Max), macOS 26.6.1 (25G76)
+control:    mac-studio-m1u (Mac13,2, Apple M1 Ultra), macOS 26.6.2
+OpenSSH:    OpenSSH_10.3p1 on both
+params:     -k p-256-ne -t none --allow-unattended-signing
+```
+
+On the M4 Max, `ssh-keygen -K -w /usr/lib/ssh-keychain.dylib` fails for every
+`none` identity — ones created from a home-manager activation and one created
+from an interactive shell alike — with `Provider "/usr/lib/ssh-keychain.dylib"
+returned failure -1` / `Unable to load resident keys: invalid format`, right
+after the PIN prompt. The unified log shows the provider's own lookup missing:
+
+```text
+ssh-sk-helper [com.apple.CryptoTokenKit:sshkeychain] SecItemCopyMatching failed with: -25300
+```
+
+(-25300 is errSecItemNotFound.) `sc_auth list-ctk-identities` lists the
+identities normally, and the console session is logged in. The same download,
+same askpass script, same parameters succeeds on the M1 Ultra over SSH. macOS
+26.6.2 was pending on the M4 Max at the time; whether the release or the
+hardware is the difference is not yet measured.
+
+`install` used to report this as "native askpass rejected an unexpected
+OpenSSH prompt", because the provider failure cuts the prompt sequence short.
+It now reports OpenSSH's own message.

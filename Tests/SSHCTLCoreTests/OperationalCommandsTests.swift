@@ -153,6 +153,22 @@ import Testing
     }
 }
 
+@Test func identityFileInstallReportsProviderFailureOverPromptCount() {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(throws: OperationalCommandError.commandFailed(
+        "Provider \"/usr/lib/ssh-keychain.dylib\" returned failure -1\nUnable to load resident keys: invalid format"
+    )) {
+        try IdentityFileInstaller(executor: OperationalExecutor(providerFails: true)).install(
+            ctkSHA256: hash,
+            identityFile: root.appendingPathComponent("identity"),
+            passphrase: Data()
+        )
+    }
+}
+
 @Test func identityFileInstallRejectsMissingPassphrasePrompt() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -489,6 +505,7 @@ private final class OperationalExecutor: SubprocessExecuting {
     private let protection: String
     private let downloadTimedOut: Bool
     private let askPassFailed: Bool
+    private let providerFails: Bool
     private let passphrasePromptCount: Int
     private let identityCount: Int
     private let matchingDownloadAttempt: Int
@@ -503,6 +520,7 @@ private final class OperationalExecutor: SubprocessExecuting {
         protection: String = "none",
         downloadTimedOut: Bool = false,
         askPassFailed: Bool = false,
+        providerFails: Bool = false,
         passphrasePromptCount: Int = 2,
         identityCount: Int = 1,
         matchingDownloadAttempt: Int = 1,
@@ -518,6 +536,7 @@ private final class OperationalExecutor: SubprocessExecuting {
         self.protection = protection
         self.downloadTimedOut = downloadTimedOut
         self.askPassFailed = askPassFailed
+        self.providerFails = providerFails
         self.passphrasePromptCount = passphrasePromptCount
         self.identityCount = identityCount
         self.matchingDownloadAttempt = matchingDownloadAttempt
@@ -562,6 +581,15 @@ private final class OperationalExecutor: SubprocessExecuting {
                 return SubprocessResult(
                     stdout: "", stderr: "", exitStatus: 15, terminationReason: .uncaughtSignal, timedOut: true
                 )
+            }
+            if providerFails {
+                // Only the PIN prompt happens; the provider then refuses and
+                // ssh-keygen exits without writing anything.
+                return operationalResult(stderr: """
+                \(AskPassResponder.successMarker):pin
+                Provider "/usr/lib/ssh-keychain.dylib" returned failure -1
+                Unable to load resident keys: invalid format
+                """, exitStatus: 1)
             }
             let directory = request.currentDirectoryURL!
             try Data("identityFile".utf8).write(to: directory.appendingPathComponent("id_test"))
