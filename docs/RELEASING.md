@@ -1,8 +1,27 @@
 # Release automation
 
-Stable `vMAJOR.MINOR.PATCH` tags are the only inputs to Homebrew distribution.
-The release workflow builds and tests the tag, creates its GitHub Release, then
-sends a `se-sshctl-release` repository dispatch to `ajchemist/homebrew-tap`.
+Stable `vMAJOR.MINOR.PATCH` tags are the only inputs to distribution. The
+release workflow builds and tests the tag, builds a universal (arm64 + x86_64)
+binary, and creates the GitHub Release with two assets:
+
+- `se-sshctl-MAJOR.MINOR.PATCH-macos-universal.tar.gz` — one file, `se-sshctl`,
+  ad-hoc signed as the linker leaves it (not notarized; `curl` and package
+  managers do not set the quarantine attribute, a browser download does);
+- `SHA256SUMS` — `shasum -a 256` over the tarball.
+
+Anything that wants a pinned binary (a nix expression, a script) fetches the
+tarball by tag and checks it against `SHA256SUMS`. Re-running the workflow for an
+existing Release re-uploads both assets (`--clobber`).
+
+The universal binary is two `swift build --triple` slices joined with `lipo`,
+not `swift build --arch a --arch b`: the latter needs Xcode's xcbuild, the
+former works with the Command Line Tools alone, so the same steps run on a
+developer Mac.
+
+The workflow then sends a `se-sshctl-release` repository dispatch to
+`ajchemist/homebrew-tap` whose payload also carries `asset` (the tarball file
+name) and `asset_url` (its download URL), so the tap can point its Formula at
+the released binary instead of building from the source archive.
 The tap independently downloads the immutable tag archive, computes its SHA-256,
 and opens a Formula update PR. Homebrew's `test-bot` builds and tests the source
 fallback and a macOS 26 bottle. After that exact PR commit passes, `pr-pull`

@@ -40,10 +40,34 @@ jobs:
           swift build --configuration release
           swift test
 
+      # One slice per --triple, then lipo: works with the Command Line Tools
+      # alone, where `swift build --arch a --arch b` needs Xcode's xcbuild.
+      - name: Build release assets
+        id: assets
+        run: |
+          swift build --configuration release --triple arm64-apple-macosx
+          swift build --configuration release --triple x86_64-apple-macosx
+          mkdir -p dist/stage
+          lipo -create -output dist/stage/se-sshctl \
+            .build/arm64-apple-macosx/release/se-sshctl \
+            .build/x86_64-apple-macosx/release/se-sshctl
+          lipo -info dist/stage/se-sshctl
+          test "$(dist/stage/se-sshctl --version)" = "se-sshctl ${TAG#v}"
+          asset="se-sshctl-${TAG#v}-macos-universal.tar.gz"
+          tar -C dist/stage -czf "dist/$asset" se-sshctl
+          (cd dist && shasum -a 256 "$asset" > SHA256SUMS && shasum -a 256 -c SHA256SUMS)
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --generate-notes
+          ASSET: ${{ steps.assets.outputs.asset }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "dist/$ASSET" dist/SHA256SUMS --clobber
+          else
+            gh release create "$TAG" --verify-tag --generate-notes "dist/$ASSET" dist/SHA256SUMS
+          fi
 
       - name: Create scoped tap token
         id: tap-token
@@ -58,6 +82,7 @@ jobs:
       - name: Dispatch immutable release to Homebrew tap
         env:
           GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+          ASSET: ${{ steps.assets.outputs.asset }}
         run: |
           commit=$(git rev-parse "refs/tags/$TAG^{commit}")
           gh api --method POST repos/ajchemist/homebrew-tap/dispatches \
@@ -65,4 +90,6 @@ jobs:
             -f "client_payload[repository]=$GITHUB_REPOSITORY" \
             -f "client_payload[tag]=$TAG" \
             -f "client_payload[commit]=$commit" \
-            -f "client_payload[license]=$HOMEBREW_LICENSE"
+            -f "client_payload[license]=$HOMEBREW_LICENSE" \
+            -f "client_payload[asset]=$ASSET" \
+            -f "client_payload[asset_url]=https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET"
