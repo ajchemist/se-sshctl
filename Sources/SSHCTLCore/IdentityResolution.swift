@@ -29,7 +29,7 @@ public enum OperationalCommandError: Error, LocalizedError, Equatable {
         case .invalidSSHOption: "--ssh-option must be non-empty and contain no control characters"
         case .invalidTag: "tag must be one word with no whitespace or control characters"
         case .identityFileExists: "identity file or its .pub file already exists"
-        case .insecureDirectory: "identity-file directory must not be accessible by group or other users"
+        case .insecureDirectory: "identity-file directory must not be writable by group or other users"
         case let .commandFailed(detail): "OpenSSH command failed" + (detail.isEmpty ? "" : ": \(detail)")
         case .identityFileNotFound: "ssh-keygen did not produce a matching identity file"
         case .fingerprintMismatch: "identity file fingerprint does not match the selected CTK SHA-256 hash"

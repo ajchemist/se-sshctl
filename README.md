@@ -67,6 +67,10 @@ IDENTITY_FILE="$HOME/.ssh/identities/example/id_ecdsa_sk_rk"
 se-sshctl install --ctk-sha256 "$CTK_SHA256" --identity-file "$IDENTITY_FILE"
 ```
 
+The identity file is installed mode 0400 and its `.pub` mode 0444. A parent
+directory that does not exist is created mode 0700; one that exists is accepted
+unless group or other users can write to it.
+
 The command asks for an identity-file passphrase twice. Enter an empty passphrase
 twice if you do not want one. The OpenSSH private key file contains a key handle
 for provider-backed operations, not exported Secure Enclave private-key material.

@@ -99,6 +99,30 @@ import Testing
     #expect(download.standardInput == taggedDownloadInput(pin: Data(), passphrase: Data()))
 }
 
+@Test func identityFileInstallAcceptsAReadableDirectoryButNotAWritableOne() throws {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(
+        at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o755]
+    )
+
+    // 755 (a common ~/.ssh/identities) installs; the file is 0400 regardless.
+    _ = try IdentityFileInstaller(executor: OperationalExecutor()).install(
+        ctkSHA256: hash, identityFile: root.appendingPathComponent("identity"), passphrase: Data()
+    )
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o775], ofItemAtPath: root.path)
+    let executor = OperationalExecutor()
+    #expect(throws: OperationalCommandError.insecureDirectory) {
+        try IdentityFileInstaller(executor: executor).install(
+            ctkSHA256: hash, identityFile: root.appendingPathComponent("other"), passphrase: Data()
+        )
+    }
+    // Refused before any download was attempted.
+    #expect(!executor.requests.contains { $0.arguments.first == "-K" })
+}
+
 @Test func identityFileInstallReportsOpenSSHTimeout() {
     let hash = String(repeating: "A", count: 64)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

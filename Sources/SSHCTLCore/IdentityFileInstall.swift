@@ -146,9 +146,12 @@ public struct IdentityFileInstaller {
                 attributes: [.posixPermissions: 0o700]
             )
         }
+        // The file itself is installed 0400 and holds a handle, not key
+        // material, so the threat in its directory is a swap, not a read:
+        // refuse group- or world-writable, accept a common 755 ~/.ssh/identities.
         let attributes = try fileManager.attributesOfItem(atPath: directory.path)
         let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777
-        guard permissions & 0o077 == 0 else { throw OperationalCommandError.insecureDirectory }
+        guard permissions & 0o022 == 0 else { throw OperationalCommandError.insecureDirectory }
     }
 }
 

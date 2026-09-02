@@ -685,7 +685,9 @@ Runs 'ssh-keygen -K -w /usr/lib/ssh-keychain.dylib' in isolated directories,
 selects by SSH fingerprint, and refuses overwrite. The trusted provider path is fixed, not user-configurable.
 The default identity-file path is ~/.ssh/identities/id_<first-16-hash-characters>.
 The identity file contains a key handle, not exported Secure Enclave private-key material. It is installed mode 0400;
-its .pub file is installed mode 0444; newly created parent directories are mode 0700.
+its .pub file is installed mode 0444; newly created parent directories are mode 0700, and an existing
+parent directory is refused when it is writable by group or other users (a swap is the threat there;
+readability is not, the file holds only a handle).
 Before download, the command reads an identity-file passphrase twice from the controlling terminal
 with echo disabled, like ssh-keygen. Submit an empty passphrase twice for no passphrase.
 
