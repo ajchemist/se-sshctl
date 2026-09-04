@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
+
+No compatibility breaks.
+
+### Added: `install` says when the keychain lacks the token's identities
+
+Apple's provider reads CTK identities from the keychain's token access group,
+not from the token itself, and on one Mac that group was empty while `sc_auth`
+listed three identities: `ssh-keygen -K` failed with `Provider
+"/usr/lib/ssh-keychain.dylib" returned failure -1` from the console session and
+over SSH alike, and the same download worked on two other Macs (measurements in
+`docs/HARDWARE_VERIFICATION.md`). When the provider cannot load resident keys,
+`install` now queries that access group and, if it holds fewer identities than
+`sc_auth` lists, says so with both counts, what has been measured about it, and
+the `system_profiler` view that shows the difference. A complete view, or one
+that cannot be read, adds nothing: OpenSSH's own message stands.
 
 ### Changed: `config render --tag` emits `Match final tagged`
 
