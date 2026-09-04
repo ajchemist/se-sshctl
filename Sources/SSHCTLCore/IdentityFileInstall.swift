@@ -15,10 +15,16 @@ public struct IdentityFileInstallReport: Encodable, Equatable, Sendable {
 public struct IdentityFileInstaller {
     private let executor: any SubprocessExecuting
     private let fileManager: FileManager
+    private let tokenIdentityCount: () -> Int?
 
-    public init(executor: any SubprocessExecuting, fileManager: FileManager = .default) {
+    public init(
+        executor: any SubprocessExecuting,
+        fileManager: FileManager = .default,
+        tokenIdentityCount: @escaping () -> Int? = KeychainTokenView.identityCount
+    ) {
         self.executor = executor
         self.fileManager = fileManager
+        self.tokenIdentityCount = tokenIdentityCount
     }
 
     public func install(
@@ -91,8 +97,15 @@ public struct IdentityFileInstaller {
             } catch where !result.succeeded {
                 // OpenSSH gave up before the prompts could complete (a provider
                 // that cannot load the identity, for one); its own message is
-                // the finding, not the prompt count it never reached.
-                throw OperationalCommandError.commandFailed(openSSHDetail(in: result.stderr))
+                // the finding, not the prompt count it never reached. When the
+                // provider could not load, say whether the keychain even holds
+                // the token's identities for it to find.
+                var detail = openSSHDetail(in: result.stderr)
+                if result.stderr.contains("Unable to load resident keys"),
+                   let why = KeychainTokenView.shortfall(found: tokenIdentityCount(), listed: resolved.identityCount) {
+                    detail += "\n" + why
+                }
+                throw OperationalCommandError.commandFailed(detail)
             }
             if identityIndex == resolved.identityCount { fullDownloadResult = result }
 

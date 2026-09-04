@@ -286,3 +286,29 @@ hardware is the difference is not yet measured.
 `install` used to report this as "native askpass rejected an unexpected
 OpenSSH prompt", because the provider failure cuts the prompt sequence short.
 It now reports OpenSSH's own message.
+
+### Narrowed — 2026-09-04
+
+Same two Macs, still macOS 26.6.1 on the M4 Max and 26.6.2 on the M1 Ultra,
+neither rebooted since before the identities were created (uptime 26 and 12
+days). Measured:
+
+- The download fails identically from a `gui/501` launchd job (`launchctl
+  managername` = Aqua) and from a shell whose ancestor was started over SSH
+  (Background). The session domain is not the difference.
+- `SecItemCopyMatching` for `kSecClassIdentity` in `kSecAttrAccessGroupToken`
+  returns `errSecItemNotFound` on the M4 Max and three identities
+  (`tokenID=com.apple.ctkcard:user`) on the M1 Ultra. `system_profiler
+  SPSmartCardsDataType` shows the same split: on the M4 Max the three
+  identities appear under "Available SmartCards (token)" and none under
+  "(keychain)"; on the M1 Ultra both sections list them.
+- Killing the user's `ctkahp` process on the M4 Max changed nothing (and it did
+  not respawn until the next login; do not repeat this).
+- macOS 26.6.2 is offered to the M4 Max by `softwareupdate -l` and has not been
+  applied.
+
+So the provider's `-25300` is a keychain that does not hold the token's
+identities, not a session, a stale agent, or the identity itself. Whether the
+26.6.2 update or a reboot restores the view is not yet measured; that is the
+next row. `install` reports the two counts since 0.3.1.
+

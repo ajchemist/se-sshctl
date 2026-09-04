@@ -161,12 +161,35 @@ import Testing
     #expect(throws: OperationalCommandError.commandFailed(
         "Provider \"/usr/lib/ssh-keychain.dylib\" returned failure -1\nUnable to load resident keys: invalid format"
     )) {
-        try IdentityFileInstaller(executor: OperationalExecutor(providerFails: true)).install(
+        try IdentityFileInstaller(executor: OperationalExecutor(providerFails: true), tokenIdentityCount: { 1 }).install(
             ctkSHA256: hash,
             identityFile: root.appendingPathComponent("identity"),
             passphrase: Data()
         )
     }
+}
+
+@Test func identityFileInstallExplainsProviderFailureWhenKeychainLacksTheToken() {
+    let hash = String(repeating: "A", count: 64)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    do {
+        try IdentityFileInstaller(executor: OperationalExecutor(providerFails: true), tokenIdentityCount: { 0 }).install(
+            ctkSHA256: hash,
+            identityFile: root.appendingPathComponent("identity"),
+            passphrase: Data()
+        )
+        Issue.record("install succeeded without a provider")
+    } catch OperationalCommandError.commandFailed(let detail) {
+        #expect(detail.hasPrefix("Provider \"/usr/lib/ssh-keychain.dylib\" returned failure -1\n"))
+        #expect(detail.contains("token view, which holds 0 while sc_auth lists 1"))
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+    // An unreadable view proves nothing, so the provider's message stands alone.
+    #expect(KeychainTokenView.shortfall(found: nil, listed: 1) == nil)
+    #expect(KeychainTokenView.shortfall(found: 1, listed: 1) == nil)
 }
 
 @Test func identityFileInstallRejectsMissingPassphrasePrompt() {
